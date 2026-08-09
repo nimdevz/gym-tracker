@@ -1,0 +1,22 @@
+{
+  "name": "gym-tracker-monorepo",
+  "private": true,
+  "scripts": {
+    "dev": "turbo dev",
+    "build": "turbo build",
+    "lint": "turbo lint",
+    "typecheck": "turbo typecheck",
+    "test": "turbo test",
+    "db:generate": "pnpm --filter @gym-tracker/db generate",
+    "db:migrate": "pnpm --filter @gym-tracker/db migrate",
+    "db:seed": "pnpm --filter @gym-tracker/db seed"
+  },
+  "devDependencies": {
+    "turbo": "^2.0.0",
+    "typescript": "^5.4.0"
+  },
+  "packageManager": "pnpm@9.0.0",
+  "engines": {
+    "node": ">=18.0.0"
+  }
+}
