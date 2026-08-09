@@ -2,6 +2,12 @@
 @tailwind components;
 @tailwind utilities;
 
+@layer base {
+  * {
+    font-family: 'Helvetica Neue', Helvetica, Arial, sans-serif !important;
+  }
+}
+
 :root {
   --background: 9 9 11;
   --foreground: 250 250 250;
@@ -10,7 +16,7 @@
 body {
   color: rgb(var(--foreground));
   background-color: #09090b;
-  font-family: system-ui, -apple-system, BlinkMacSystemFont, 'Segoe UI', Roboto, Oxygen, Ubuntu, Cantarell, sans-serif;
+  font-family: 'Helvetica Neue', Helvetica, Arial, sans-serif;
   min-height: 100vh;
 }
 
