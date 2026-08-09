@@ -2,7 +2,7 @@ import { FastifyInstance } from 'fastify';
 import { authenticate } from '../plugins/auth.js';
 import { db, bodyMeasurements, eq, and, desc } from '@gym-tracker/db';
 import { CreateBodyMeasurementSchema } from '@gym-tracker/validation';
-import { memoryStore } from '../services/store.js';
+import { memoryStore, isDbAvailable } from '../services/store.js';
 import { BodyMeasurementData } from '@gym-tracker/types';
 
 export async function bodyMeasurementRoutes(fastify: FastifyInstance) {
@@ -10,14 +10,16 @@ export async function bodyMeasurementRoutes(fastify: FastifyInstance) {
   fastify.get('/api/body-measurements', { preHandler: [authenticate] }, async (request, reply) => {
     const user = request.user!;
 
-    try {
-      const list = await db.query.bodyMeasurements.findMany({
-        where: eq(bodyMeasurements.userId, user.id),
-        orderBy: [desc(bodyMeasurements.date)],
-      });
+    if (await isDbAvailable()) {
+      try {
+        const list = await db.query.bodyMeasurements.findMany({
+          where: eq(bodyMeasurements.userId, user.id),
+          orderBy: [desc(bodyMeasurements.date)],
+        });
 
-      if (list.length > 0) return reply.send(list);
-    } catch (err) {}
+        if (list.length > 0) return reply.send(list);
+      } catch (err) {}
+    }
 
     const memList = memoryStore.bodyMeasurements.filter(b => b.userId === user.id);
     return reply.send(memList);
@@ -34,31 +36,33 @@ export async function bodyMeasurementRoutes(fastify: FastifyInstance) {
 
     const data = parseResult.data;
 
-    try {
-      const existing = await db.query.bodyMeasurements.findFirst({
-        where: and(eq(bodyMeasurements.userId, user.id), eq(bodyMeasurements.date, data.date)),
-      });
+    if (await isDbAvailable()) {
+      try {
+        const existing = await db.query.bodyMeasurements.findFirst({
+          where: and(eq(bodyMeasurements.userId, user.id), eq(bodyMeasurements.date, data.date)),
+        });
 
-      if (existing) {
-        const [updated] = await db
-          .update(bodyMeasurements)
-          .set({ ...data })
-          .where(eq(bodyMeasurements.id, existing.id))
-          .returning();
+        if (existing) {
+          const [updated] = await db
+            .update(bodyMeasurements)
+            .set({ ...data })
+            .where(eq(bodyMeasurements.id, existing.id))
+            .returning();
 
-        if (updated) return reply.send(updated);
-      } else {
-        const [created] = await db
-          .insert(bodyMeasurements)
-          .values({
-            userId: user.id,
-            ...data,
-          })
-          .returning();
+          if (updated) return reply.send(updated);
+        } else {
+          const [created] = await db
+            .insert(bodyMeasurements)
+            .values({
+              userId: user.id,
+              ...data,
+            })
+            .returning();
 
-        if (created) return reply.status(201).send(created);
-      }
-    } catch (err) {}
+          if (created) return reply.status(201).send(created);
+        }
+      } catch (err) {}
+    }
 
     const newMemBm: BodyMeasurementData = {
       id: `bm-${Date.now()}`,
@@ -83,9 +87,11 @@ export async function bodyMeasurementRoutes(fastify: FastifyInstance) {
     const user = request.user!;
     const { id } = request.params as { id: string };
 
-    try {
-      await db.delete(bodyMeasurements).where(eq(bodyMeasurements.id, id));
-    } catch (err) {}
+    if (await isDbAvailable()) {
+      try {
+        await db.delete(bodyMeasurements).where(eq(bodyMeasurements.id, id));
+      } catch (err) {}
+    }
 
     memoryStore.bodyMeasurements = memoryStore.bodyMeasurements.filter(b => b.id !== id);
     return reply.send({ success: true, message: 'Measurement deleted' });

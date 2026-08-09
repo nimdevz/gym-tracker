@@ -1,4 +1,5 @@
 import { Exercise, WorkoutData, PersonalRecordData, BodyMeasurementData, UserSettingsData, InsightItem } from '@gym-tracker/types';
+import { db, sql } from '@gym-tracker/db';
 
 export const INITIAL_EXERCISES: Exercise[] = [
   // Chest
@@ -219,3 +220,28 @@ class MemoryStore {
 }
 
 export const memoryStore = new MemoryStore();
+
+let isPostgresAvailable: boolean | null = null;
+let lastCheckTime = 0;
+
+export async function isDbAvailable(): Promise<boolean> {
+  const now = Date.now();
+  if (isPostgresAvailable !== null && now - lastCheckTime < 15000) {
+    return isPostgresAvailable;
+  }
+
+  lastCheckTime = now;
+  try {
+    const testPromise = db.execute(sql`SELECT 1`);
+    const timeoutPromise = new Promise((_, reject) =>
+      setTimeout(() => reject(new Error('DB_TIMEOUT')), 150)
+    );
+
+    await Promise.race([testPromise, timeoutPromise]);
+    isPostgresAvailable = true;
+    return true;
+  } catch (err) {
+    isPostgresAvailable = false;
+    return false;
+  }
+}

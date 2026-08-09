@@ -2,6 +2,7 @@ import type { Metadata } from 'next';
 import './globals.css';
 import { Providers } from '@/components/providers';
 import { Navbar } from '@/components/Navbar';
+import { InteractiveGradientBg } from '@/components/InteractiveGradientBg';
 
 export const metadata: Metadata = {
   title: 'Gym Tracker - Serious Strength & Workout Logger',
@@ -15,9 +16,12 @@ export default function RootLayout({
 }) {
   return (
     <html lang="en" className="dark">
-      <body className="text-zinc-100 antialiased selection:bg-emerald-500 selection:text-zinc-950 min-h-screen">
+      <body className="bg-zinc-950 text-zinc-100 antialiased selection:bg-emerald-500 selection:text-zinc-950 relative min-h-screen">
+        {/* Interactive Mouse-Following & Continuous Floating Green Gradient */}
+        <InteractiveGradientBg />
+
         <Providers>
-          <div className="min-h-screen flex flex-col pb-20 md:pb-0">
+          <div className="min-h-screen flex flex-col pb-20 md:pb-0 relative z-0">
             <Navbar />
             <main className="flex-1">{children}</main>
           </div>

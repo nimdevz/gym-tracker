@@ -49,7 +49,7 @@ export const UpdateSetSchema = CreateSetSchema.partial().extend({
 });
 
 export const AddWorkoutExerciseSchema = z.object({
-  exerciseId: z.string().uuid('Invalid exercise ID'),
+  exerciseId: z.string().min(1, 'Exercise ID is required'),
   order: z.number().int().min(0).optional(),
   notes: z.string().optional().nullable(),
   sets: z.array(CreateSetSchema).optional(),

@@ -3,7 +3,7 @@ import { authenticate } from '../plugins/auth.js';
 import { db, exercises, workouts, workoutExercises, sets, personalRecords, eq, ilike, and, desc } from '@gym-tracker/db';
 import { CreateExerciseSchema } from '@gym-tracker/validation';
 import { calculateEstimated1RM, calculateSetVolume } from '@gym-tracker/intelligence';
-import { memoryStore, INITIAL_EXERCISES } from '../services/store.js';
+import { memoryStore, isDbAvailable } from '../services/store.js';
 
 export async function exerciseRoutes(fastify: FastifyInstance) {
   // GET /api/exercises
@@ -14,32 +14,32 @@ export async function exerciseRoutes(fastify: FastifyInstance) {
       equipment?: string;
     };
 
-    try {
-      let query = db.select().from(exercises);
-      const conditions = [];
+    if (await isDbAvailable()) {
+      try {
+        let query = db.select().from(exercises);
+        const conditions = [];
 
-      if (search) {
-        conditions.push(ilike(exercises.name, `%${search}%`));
-      }
-      if (muscleGroup && muscleGroup !== 'all') {
-        conditions.push(eq(exercises.muscleGroup, muscleGroup));
-      }
-      if (equipment && equipment !== 'all') {
-        conditions.push(eq(exercises.equipment, equipment));
-      }
+        if (search) {
+          conditions.push(ilike(exercises.name, `%${search}%`));
+        }
+        if (muscleGroup && muscleGroup !== 'all') {
+          conditions.push(eq(exercises.muscleGroup, muscleGroup));
+        }
+        if (equipment && equipment !== 'all') {
+          conditions.push(eq(exercises.equipment, equipment));
+        }
 
-      if (conditions.length > 0) {
-        // @ts-ignore
-        query = query.where(and(...conditions));
-      }
+        if (conditions.length > 0) {
+          // @ts-ignore
+          query = query.where(and(...conditions));
+        }
 
-      const result = await query;
-      if (result.length > 0) return reply.send(result);
-    } catch (err) {
-      // Fallthrough to memory store if DB is not reachable
+        const result = await query;
+        if (result.length > 0) return reply.send(result);
+      } catch (err) {}
     }
 
-    // Memory Store Fallback
+    // Fast Memory Store Fallback
     let filtered = memoryStore.exercises;
     if (search) {
       filtered = filtered.filter(e => e.name.toLowerCase().includes(search.toLowerCase()));
@@ -54,7 +54,7 @@ export async function exerciseRoutes(fastify: FastifyInstance) {
     return reply.send(filtered);
   });
 
-  // POST /api/exercises (Create custom exercise)
+  // POST /api/exercises
   fastify.post('/api/exercises', { preHandler: [authenticate] }, async (request, reply) => {
     const parseResult = CreateExerciseSchema.safeParse(request.body);
     if (!parseResult.success) {
@@ -63,22 +63,22 @@ export async function exerciseRoutes(fastify: FastifyInstance) {
 
     const data = parseResult.data;
 
-    try {
-      const [created] = await db
-        .insert(exercises)
-        .values({
-          name: data.name,
-          muscleGroup: data.muscleGroup,
-          secondaryMuscleGroups: data.secondaryMuscleGroups || [],
-          equipment: data.equipment,
-          exerciseType: data.exerciseType,
-          instructions: data.instructions,
-        })
-        .returning();
+    if (await isDbAvailable()) {
+      try {
+        const [created] = await db
+          .insert(exercises)
+          .values({
+            name: data.name,
+            muscleGroup: data.muscleGroup,
+            secondaryMuscleGroups: data.secondaryMuscleGroups || [],
+            equipment: data.equipment,
+            exerciseType: data.exerciseType,
+            instructions: data.instructions,
+          })
+          .returning();
 
-      return reply.status(201).send(created);
-    } catch (err: any) {
-      // Fallback
+        return reply.status(201).send(created);
+      } catch (err: any) {}
     }
 
     const newEx = {
@@ -100,13 +100,15 @@ export async function exerciseRoutes(fastify: FastifyInstance) {
   fastify.get('/api/exercises/:id', { preHandler: [authenticate] }, async (request, reply) => {
     const { id } = request.params as { id: string };
 
-    try {
-      const ex = await db.query.exercises.findFirst({
-        where: eq(exercises.id, id),
-      });
+    if (await isDbAvailable()) {
+      try {
+        const ex = await db.query.exercises.findFirst({
+          where: eq(exercises.id, id),
+        });
 
-      if (ex) return reply.send(ex);
-    } catch (err) {}
+        if (ex) return reply.send(ex);
+      } catch (err) {}
+    }
 
     const ex = memoryStore.exercises.find(e => e.id === id);
     if (!ex) return reply.status(404).send({ error: 'Exercise not found' });
@@ -123,30 +125,32 @@ export async function exerciseRoutes(fastify: FastifyInstance) {
       w.userId === user.id && w.status === 'completed' && w.workoutExercises.some(we => we.exerciseId === exerciseId)
     );
 
-    try {
-      const dbEx = await db.query.exercises.findFirst({
-        where: eq(exercises.id, exerciseId),
-      });
+    if (await isDbAvailable()) {
+      try {
+        const dbEx = await db.query.exercises.findFirst({
+          where: eq(exercises.id, exerciseId),
+        });
 
-      if (dbEx) {
-        ex = dbEx as any;
-        const userWorkouts = await db.query.workouts.findMany({
-          where: and(eq(workouts.userId, user.id), eq(workouts.status, 'completed')),
-          orderBy: [desc(workouts.startTime)],
-          with: {
-            workoutExercises: {
-              where: eq(workoutExercises.exerciseId, exerciseId),
-              with: {
-                sets: true,
+        if (dbEx) {
+          ex = dbEx as any;
+          const userWorkouts = await db.query.workouts.findMany({
+            where: and(eq(workouts.userId, user.id), eq(workouts.status, 'completed')),
+            orderBy: [desc(workouts.startTime)],
+            with: {
+              workoutExercises: {
+                where: eq(workoutExercises.exerciseId, exerciseId),
+                with: {
+                  sets: true,
+                },
               },
             },
-          },
-        });
-        if (userWorkouts.length > 0) {
-          relevantWorkouts = userWorkouts as any;
+          });
+          if (userWorkouts.length > 0) {
+            relevantWorkouts = userWorkouts as any;
+          }
         }
-      }
-    } catch (err) {}
+      } catch (err) {}
+    }
 
     if (!ex) {
       return reply.status(404).send({ error: 'Exercise not found' });

@@ -60,6 +60,7 @@ export default function ActiveWorkoutLoggerPage() {
       }),
     onSuccess: () => {
       queryClient.invalidateQueries({ queryKey: ['workout', workoutId] });
+      queryClient.invalidateQueries({ queryKey: ['activeWorkout'] });
     },
   });
 
@@ -99,6 +100,10 @@ export default function ActiveWorkoutLoggerPage() {
       }),
     onSuccess: (_, variables) => {
       queryClient.invalidateQueries({ queryKey: ['workout', workoutId] });
+      queryClient.invalidateQueries({ queryKey: ['progress'] });
+      queryClient.invalidateQueries({ queryKey: ['insights'] });
+      queryClient.invalidateQueries({ queryKey: ['records'] });
+
       // If completing set, trigger rest timer
       if (variables.data.completed) {
         setActiveRestSeconds(90);
@@ -123,8 +128,13 @@ export default function ActiveWorkoutLoggerPage() {
         body: JSON.stringify({ status: 'completed' }),
       }),
     onSuccess: () => {
+      // Refresh ALL query keys across Dashboard, History, Progress, and Records
       queryClient.invalidateQueries({ queryKey: ['activeWorkout'] });
       queryClient.invalidateQueries({ queryKey: ['workouts'] });
+      queryClient.invalidateQueries({ queryKey: ['recentWorkouts'] });
+      queryClient.invalidateQueries({ queryKey: ['progress'] });
+      queryClient.invalidateQueries({ queryKey: ['insights'] });
+      queryClient.invalidateQueries({ queryKey: ['records'] });
       router.push('/dashboard');
     },
   });
@@ -198,7 +208,7 @@ export default function ActiveWorkoutLoggerPage() {
               }
             }}
             disabled={finishWorkoutMutation.isPending}
-            className="flex items-center gap-2 rounded-2xl bg-emerald-500 px-6 py-3 font-bold text-zinc-950 hover:bg-emerald-400 transition-all shadow-lg shadow-emerald-500/20"
+            className="flex items-center gap-2 rounded-2xl bg-emerald-500 px-6 py-3 font-bold text-zinc-950 hover:bg-emerald-400 transition-all shadow-lg shadow-emerald-500/20 cursor-pointer"
           >
             <CheckCircle2 className="h-5 w-5" />
             <span>Finish Workout</span>
@@ -245,7 +255,7 @@ export default function ActiveWorkoutLoggerPage() {
                         removeExerciseMutation.mutate(we.id);
                       }
                     }}
-                    className="rounded-xl p-2 text-zinc-500 hover:bg-zinc-800 hover:text-rose-400 transition-colors"
+                    className="rounded-xl p-2 text-zinc-500 hover:bg-zinc-800 hover:text-rose-400 transition-colors cursor-pointer"
                   >
                     <Trash2 className="h-4 w-4" />
                   </button>
@@ -334,7 +344,7 @@ export default function ActiveWorkoutLoggerPage() {
                                   data: { completed: !setItem.completed },
                                 })
                               }
-                              className={`h-7 w-7 rounded-lg inline-flex items-center justify-center transition-all ${
+                              className={`h-7 w-7 rounded-lg inline-flex items-center justify-center transition-all cursor-pointer ${
                                 setItem.completed
                                   ? 'bg-emerald-500 text-zinc-950 shadow-md shadow-emerald-500/20'
                                   : 'border border-zinc-700 bg-zinc-950 text-zinc-600 hover:border-zinc-500'
@@ -346,7 +356,7 @@ export default function ActiveWorkoutLoggerPage() {
                           <td className="py-2.5 text-right">
                             <button
                               onClick={() => deleteSetMutation.mutate(setItem.id)}
-                              className="text-zinc-600 hover:text-rose-400 transition-colors p-1"
+                              className="text-zinc-600 hover:text-rose-400 transition-colors p-1 cursor-pointer"
                             >
                               <X className="h-4 w-4" />
                             </button>
@@ -370,7 +380,7 @@ export default function ActiveWorkoutLoggerPage() {
                         rir: lastSet?.rir ?? 2,
                       });
                     }}
-                    className="flex items-center gap-1.5 rounded-xl border border-zinc-800 bg-zinc-950 px-4 py-2 text-xs font-bold text-emerald-400 hover:bg-zinc-900 transition-colors"
+                    className="flex items-center gap-1.5 rounded-xl border border-zinc-800 bg-zinc-950 px-4 py-2 text-xs font-bold text-emerald-400 hover:bg-zinc-900 transition-colors cursor-pointer"
                   >
                     <Plus className="h-3.5 w-3.5" />
                     <span>Add Set</span>
@@ -388,7 +398,7 @@ export default function ActiveWorkoutLoggerPage() {
                           rir: lastSet.rir ?? 2,
                         });
                       }}
-                      className="flex items-center gap-1.5 rounded-xl border border-zinc-800/80 bg-zinc-950 px-3 py-2 text-xs font-semibold text-zinc-400 hover:text-zinc-200 transition-colors"
+                      className="flex items-center gap-1.5 rounded-xl border border-zinc-800/80 bg-zinc-950 px-3 py-2 text-xs font-semibold text-zinc-400 hover:text-zinc-200 transition-colors cursor-pointer"
                     >
                       <Copy className="h-3.5 w-3.5" />
                       <span>Duplicate Set</span>
@@ -404,7 +414,7 @@ export default function ActiveWorkoutLoggerPage() {
       {/* Add Exercise Trigger Button */}
       <button
         onClick={() => setIsExerciseModalOpen(true)}
-        className="w-full flex items-center justify-center gap-2 rounded-3xl border border-dashed border-emerald-500/40 bg-emerald-500/5 py-4 font-bold text-emerald-400 hover:bg-emerald-500/10 transition-all"
+        className="w-full flex items-center justify-center gap-2 rounded-3xl border border-dashed border-emerald-500/40 bg-emerald-500/5 py-4 font-bold text-emerald-400 hover:bg-emerald-500/10 transition-all cursor-pointer"
       >
         <Plus className="h-5 w-5" />
         <span>Add Exercise</span>

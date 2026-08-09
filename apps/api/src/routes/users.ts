@@ -2,21 +2,23 @@ import { FastifyInstance } from 'fastify';
 import { authenticate } from '../plugins/auth.js';
 import { db, userSettings, eq } from '@gym-tracker/db';
 import { UpdateUserSettingsSchema } from '@gym-tracker/validation';
-import { memoryStore } from '../services/store.js';
+import { memoryStore, isDbAvailable } from '../services/store.js';
 
 export async function userRoutes(fastify: FastifyInstance) {
   fastify.get('/api/users/me', { preHandler: [authenticate] }, async (request, reply) => {
     const user = request.user!;
 
-    try {
-      let settings = await db.query.userSettings.findFirst({
-        where: eq(userSettings.userId, user.id),
-      });
+    if (await isDbAvailable()) {
+      try {
+        let settings = await db.query.userSettings.findFirst({
+          where: eq(userSettings.userId, user.id),
+        });
 
-      if (settings) {
-        return reply.send({ user, settings });
-      }
-    } catch (err) {}
+        if (settings) {
+          return reply.send({ user, settings });
+        }
+      } catch (err) {}
+    }
 
     return reply.send({
       user,
@@ -34,23 +36,25 @@ export async function userRoutes(fastify: FastifyInstance) {
 
     const data = parseResult.data;
 
-    try {
-      let existing = await db.query.userSettings.findFirst({
-        where: eq(userSettings.userId, user.id),
-      });
+    if (await isDbAvailable()) {
+      try {
+        let existing = await db.query.userSettings.findFirst({
+          where: eq(userSettings.userId, user.id),
+        });
 
-      if (existing) {
-        const [updated] = await db
-          .update(userSettings)
-          .set({
-            ...data,
-            updatedAt: new Date(),
-          })
-          .where(eq(userSettings.userId, user.id))
-          .returning();
-        if (updated) return reply.send(updated);
-      }
-    } catch (err) {}
+        if (existing) {
+          const [updated] = await db
+            .update(userSettings)
+            .set({
+              ...data,
+              updatedAt: new Date(),
+            })
+            .where(eq(userSettings.userId, user.id))
+            .returning();
+          if (updated) return reply.send(updated);
+        }
+      } catch (err) {}
+    }
 
     if (data.weightUnit) memoryStore.userSettings.weightUnit = data.weightUnit;
     if (data.distanceUnit) memoryStore.userSettings.distanceUnit = data.distanceUnit;

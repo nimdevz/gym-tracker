@@ -74,14 +74,11 @@ export default function LandingPage() {
   };
 
   return (
-    <div className="relative min-h-screen flex flex-col justify-between bg-zinc-950 text-zinc-100 overflow-hidden">
-      {/* Background Glow */}
-      <div className="absolute top-1/4 left-1/2 -translate-x-1/2 -translate-y-1/2 w-[600px] h-[350px] bg-emerald-500/10 blur-[120px] rounded-full pointer-events-none" />
-
+    <div className="relative min-h-screen flex flex-col justify-between text-zinc-100 overflow-hidden">
       {/* Top Header */}
       <header className="flex items-center justify-between px-6 py-6 max-w-7xl mx-auto w-full z-10">
         <div className="flex items-center gap-2 font-bold text-xl text-emerald-400">
-          <div className="flex h-10 w-10 items-center justify-center rounded-xl bg-emerald-500/10 border border-emerald-500/20 text-emerald-400">
+          <div className="flex h-10 w-10 items-center justify-center rounded-xl bg-emerald-500/10 border border-emerald-500/20 text-emerald-400 shadow-md shadow-emerald-500/5">
             <Dumbbell className="h-6 w-6" />
           </div>
           <span>GYM<span className="text-zinc-100 font-light">TRACKER</span></span>
@@ -103,7 +100,7 @@ export default function LandingPage() {
 
         <h1 className="text-4xl sm:text-6xl font-extrabold tracking-tight text-zinc-100 leading-tight">
           Track Your Lifting. <br />
-          <span className="bg-gradient-to-r from-emerald-400 via-teal-300 to-emerald-500 bg-clip-text text-transparent">
+          <span className="text-shimmer-glow">
             Unlock Real Progress.
           </span>
         </h1>
@@ -145,7 +142,7 @@ export default function LandingPage() {
 
           <button
             onClick={handleDemoSignIn}
-            className="w-full sm:w-auto flex items-center justify-center gap-2 bg-zinc-900 hover:bg-zinc-800 text-zinc-100 font-semibold px-8 py-3.5 rounded-2xl border border-zinc-800 transition-all cursor-pointer"
+            className="w-full sm:w-auto flex items-center justify-center gap-2 bg-zinc-900/80 hover:bg-zinc-800 text-zinc-100 font-semibold px-8 py-3.5 rounded-2xl border border-zinc-800 transition-all cursor-pointer backdrop-blur-sm"
           >
             <span>Open Dashboard</span>
             <ChevronRight className="h-4 w-4 text-emerald-400" />
@@ -154,7 +151,7 @@ export default function LandingPage() {
 
         {/* Features Grid */}
         <div className="mt-16 grid grid-cols-1 sm:grid-cols-3 gap-6 text-left w-full">
-          <div className="rounded-2xl border border-zinc-800/80 bg-zinc-900/40 p-6 backdrop-blur-sm">
+          <div className="rounded-2xl border border-zinc-800/80 bg-zinc-900/40 p-6 backdrop-blur-md">
             <div className="flex h-10 w-10 items-center justify-center rounded-xl bg-emerald-500/10 text-emerald-400 mb-4">
               <Zap className="h-5 w-5" />
             </div>
@@ -164,7 +161,7 @@ export default function LandingPage() {
             </p>
           </div>
 
-          <div className="rounded-2xl border border-zinc-800/80 bg-zinc-900/40 p-6 backdrop-blur-sm">
+          <div className="rounded-2xl border border-zinc-800/80 bg-zinc-900/40 p-6 backdrop-blur-md">
             <div className="flex h-10 w-10 items-center justify-center rounded-xl bg-emerald-500/10 text-emerald-400 mb-4">
               <TrendingUp className="h-5 w-5" />
             </div>
@@ -174,7 +171,7 @@ export default function LandingPage() {
             </p>
           </div>
 
-          <div className="rounded-2xl border border-zinc-800/80 bg-zinc-900/40 p-6 backdrop-blur-sm">
+          <div className="rounded-2xl border border-zinc-800/80 bg-zinc-900/40 p-6 backdrop-blur-md">
             <div className="flex h-10 w-10 items-center justify-center rounded-xl bg-emerald-500/10 text-emerald-400 mb-4">
               <ShieldCheck className="h-5 w-5" />
             </div>
