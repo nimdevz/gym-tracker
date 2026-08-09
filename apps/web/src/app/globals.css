@@ -15,72 +15,16 @@
 
 body {
   color: rgb(var(--foreground));
-  background-color: #09090b;
   font-family: 'Helvetica Neue', Helvetica, Arial, sans-serif;
   min-height: 100vh;
-  position: relative;
-  overflow-x: hidden;
-}
-
-/* Visible Vibrant Random Green Hues Ambient Background */
-.bg-ambient-gradient {
-  position: fixed;
-  inset: 0;
-  z-index: -10;
-  pointer-events: none;
-  overflow: hidden;
-  background: radial-gradient(circle at 50% 30%, #0c120e 0%, #09090b 80%);
-}
-
-.bg-ambient-blob-1 {
-  position: absolute;
-  top: -5%;
-  left: 10%;
-  width: 600px;
-  height: 600px;
-  background: radial-gradient(circle, rgba(16, 185, 129, 0.28) 0%, rgba(5, 150, 105, 0.12) 45%, transparent 70%);
-  filter: blur(75px);
-  animation: floatGreen1 14s ease-in-out infinite alternate;
-}
-
-.bg-ambient-blob-2 {
-  position: absolute;
-  top: 35%;
-  right: -5%;
-  width: 650px;
-  height: 650px;
-  background: radial-gradient(circle, rgba(52, 211, 153, 0.24) 0%, rgba(20, 184, 166, 0.12) 50%, transparent 70%);
-  filter: blur(85px);
-  animation: floatGreen2 18s ease-in-out infinite alternate;
-}
-
-.bg-ambient-blob-3 {
-  position: absolute;
-  bottom: -5%;
-  left: 25%;
-  width: 550px;
-  height: 550px;
-  background: radial-gradient(circle, rgba(132, 204, 22, 0.22) 0%, rgba(16, 185, 129, 0.1) 50%, transparent 70%);
-  filter: blur(70px);
-  animation: floatGreen3 20s ease-in-out infinite alternate;
-}
-
-@keyframes floatGreen1 {
-  0% { transform: translate(0px, 0px) scale(1); }
-  50% { transform: translate(80px, 50px) scale(1.15); }
-  100% { transform: translate(-50px, 90px) scale(0.95); }
-}
-
-@keyframes floatGreen2 {
-  0% { transform: translate(0px, 0px) scale(1); }
-  50% { transform: translate(-90px, 70px) scale(1.2); }
-  100% { transform: translate(40px, -60px) scale(0.85); }
-}
-
-@keyframes floatGreen3 {
-  0% { transform: translate(0px, 0px) scale(1); }
-  50% { transform: translate(90px, -70px) scale(1.1); }
-  100% { transform: translate(-60px, -40px) scale(1.25); }
+  background-color: #09090b;
+  background-image: 
+    radial-gradient(circle at 20% 15%, rgba(16, 185, 129, 0.35) 0%, transparent 40%),
+    radial-gradient(circle at 85% 45%, rgba(52, 211, 153, 0.28) 0%, transparent 45%),
+    radial-gradient(circle at 35% 85%, rgba(132, 204, 22, 0.25) 0%, transparent 40%),
+    radial-gradient(circle at 70% 90%, rgba(5, 150, 105, 0.3) 0%, transparent 45%);
+  background-attachment: fixed;
+  background-size: cover;
 }
 
 /* Custom Scrollbars */
