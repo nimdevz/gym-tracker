@@ -2,28 +2,36 @@ import { FastifyInstance } from 'fastify';
 import { authenticate } from '../plugins/auth.js';
 import { db, userSettings, eq } from '@gym-tracker/db';
 import { UpdateUserSettingsSchema } from '@gym-tracker/validation';
-import { memoryStore, isDbAvailable } from '../services/store.js';
+
+const DEFAULT_SETTINGS = {
+  weightUnit: 'kg',
+  distanceUnit: 'km',
+  defaultRestTimerSeconds: 90,
+} as const;
 
 export async function userRoutes(fastify: FastifyInstance) {
   fastify.get('/api/users/me', { preHandler: [authenticate] }, async (request, reply) => {
     const user = request.user!;
 
-    if (await isDbAvailable()) {
-      try {
-        let settings = await db.query.userSettings.findFirst({
-          where: eq(userSettings.userId, user.id),
-        });
+    try {
+      let settings = await db.query.userSettings.findFirst({
+        where: eq(userSettings.userId, user.id),
+      });
 
-        if (settings) {
-          return reply.send({ user, settings });
-        }
-      } catch (err) {}
+      // Every real user gets a settings row on first visit.
+      if (!settings) {
+        const [created] = await db
+          .insert(userSettings)
+          .values({ userId: user.id, ...DEFAULT_SETTINGS })
+          .returning();
+        settings = created;
+      }
+
+      return reply.send({ user, settings });
+    } catch (err) {
+      request.log.error(err, 'GET /api/users/me failed');
+      return reply.status(500).send({ error: 'Failed to load profile' });
     }
-
-    return reply.send({
-      user,
-      settings: memoryStore.userSettings,
-    });
   });
 
   fastify.put('/api/users/settings', { preHandler: [authenticate] }, async (request, reply) => {
@@ -34,32 +42,29 @@ export async function userRoutes(fastify: FastifyInstance) {
       return reply.status(400).send({ error: 'Validation Error', details: parseResult.error.format() });
     }
 
-    const data = parseResult.data;
+    try {
+      const data = parseResult.data;
+      const existing = await db.query.userSettings.findFirst({
+        where: eq(userSettings.userId, user.id),
+      });
 
-    if (await isDbAvailable()) {
-      try {
-        let existing = await db.query.userSettings.findFirst({
-          where: eq(userSettings.userId, user.id),
-        });
+      if (existing) {
+        const [updated] = await db
+          .update(userSettings)
+          .set({ ...data, updatedAt: new Date() })
+          .where(eq(userSettings.userId, user.id))
+          .returning();
+        return reply.send(updated);
+      }
 
-        if (existing) {
-          const [updated] = await db
-            .update(userSettings)
-            .set({
-              ...data,
-              updatedAt: new Date(),
-            })
-            .where(eq(userSettings.userId, user.id))
-            .returning();
-          if (updated) return reply.send(updated);
-        }
-      } catch (err) {}
+      const [created] = await db
+        .insert(userSettings)
+        .values({ userId: user.id, ...DEFAULT_SETTINGS, ...data })
+        .returning();
+      return reply.status(201).send(created);
+    } catch (err) {
+      request.log.error(err, 'PUT /api/users/settings failed');
+      return reply.status(500).send({ error: 'Failed to save settings' });
     }
-
-    if (data.weightUnit) memoryStore.userSettings.weightUnit = data.weightUnit;
-    if (data.distanceUnit) memoryStore.userSettings.distanceUnit = data.distanceUnit;
-    if (data.defaultRestTimerSeconds) memoryStore.userSettings.defaultRestTimerSeconds = data.defaultRestTimerSeconds;
-
-    return reply.send(memoryStore.userSettings);
   });
 }

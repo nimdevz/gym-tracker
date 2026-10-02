@@ -1,10 +1,9 @@
 'use client';
 
-import React, { useState } from 'react';
-import { useQuery } from '@tanstack/react-query';
-import { apiFetch } from '@/lib/api';
+import React, { useState, useEffect } from 'react';
+import { useLibraryExercises } from '@/lib/use-data';
 import { Exercise } from '@gym-tracker/types';
-import { Search, X, Dumbbell, Plus, Filter } from 'lucide-react';
+import { Search, X, Dumbbell, Plus } from 'lucide-react';
 
 interface ExerciseSearchModalProps {
   isOpen: boolean;
@@ -23,32 +22,29 @@ const muscleGroups = [
 
 export function ExerciseSearchModal({ isOpen, onClose, onSelectExercise }: ExerciseSearchModalProps) {
   const [search, setSearch] = useState('');
+  const [debounced, setDebounced] = useState('');
   const [selectedMuscle, setSelectedMuscle] = useState('all');
 
-  const { data: exercisesList = [], isLoading } = useQuery<Exercise[]>({
-    queryKey: ['exercises', search, selectedMuscle],
-    queryFn: () => {
-      const params = new URLSearchParams();
-      if (search) params.set('search', search);
-      if (selectedMuscle !== 'all') params.set('muscleGroup', selectedMuscle);
-      return apiFetch(`/api/exercises?${params.toString()}`);
-    },
-    enabled: isOpen,
-  });
+  useEffect(() => {
+    const t = setTimeout(() => setDebounced(search.trim()), 250);
+    return () => clearTimeout(t);
+  }, [search]);
+
+  const { data: exercisesList = [], isLoading } = useLibraryExercises(debounced, selectedMuscle);
 
   if (!isOpen) return null;
 
   return (
     <div className="fixed inset-0 z-50 flex items-center justify-center bg-black/70 backdrop-blur-sm p-4">
-      <div className="flex h-[80vh] w-full max-w-2xl flex-col rounded-2xl border border-zinc-800 bg-zinc-950 p-6 shadow-2xl">
-        <div className="flex items-center justify-between pb-4 border-b border-zinc-800">
+      <div className="glass-bright flex h-[80vh] w-full max-w-2xl flex-col rounded-3xl p-6 shadow-2xl">
+        <div className="flex items-center justify-between pb-4 border-b border-white/[0.06]">
           <div className="flex items-center gap-2">
             <Dumbbell className="h-5 w-5 text-emerald-400" />
-            <h2 className="text-lg font-bold text-zinc-100">Select Exercise</h2>
+            <h2 className="font-display text-lg font-bold text-white">Select exercise</h2>
           </div>
           <button
             onClick={onClose}
-            className="rounded-lg p-1.5 text-zinc-400 hover:bg-zinc-800 hover:text-zinc-100 transition-colors"
+            className="rounded-xl p-1.5 text-zinc-400 hover:bg-white/[0.06] hover:text-white transition-colors"
           >
             <X className="h-5 w-5" />
           </button>

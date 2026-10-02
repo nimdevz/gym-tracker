@@ -1,14 +1,13 @@
 'use client';
 
-import React, { useState } from 'react';
+import React, { useState, useEffect } from 'react';
 import Link from 'next/link';
-import { useQuery } from '@tanstack/react-query';
-import { apiFetch } from '@/lib/api';
-import { Exercise } from '@gym-tracker/types';
-import { BookOpen, Search, Dumbbell, ChevronRight, Plus } from 'lucide-react';
+import { useLibraryExercises, useAuthMode } from '@/lib/use-data';
+import { Search, ChevronRight } from 'lucide-react';
+import { EmptyState, GuestBanner, PageHeader } from '@/components/ui';
 
 const muscleGroups = [
-  { id: 'all', label: 'All Muscles' },
+  { id: 'all', label: 'All' },
   { id: 'chest', label: 'Chest' },
   { id: 'back', label: 'Back' },
   { id: 'shoulders', label: 'Shoulders' },
@@ -18,87 +17,61 @@ const muscleGroups = [
 
 export default function ExerciseLibraryPage() {
   const [search, setSearch] = useState('');
+  const [debouncedSearch, setDebouncedSearch] = useState('');
   const [selectedMuscle, setSelectedMuscle] = useState('all');
+  const { mode } = useAuthMode();
 
-  const { data: exercisesList = [], isLoading } = useQuery<Exercise[]>({
-    queryKey: ['exercisesLibrary', search, selectedMuscle],
-    queryFn: () => {
-      const params = new URLSearchParams();
-      if (search) params.set('search', search);
-      if (selectedMuscle !== 'all') params.set('muscleGroup', selectedMuscle);
-      return apiFetch(`/api/exercises?${params.toString()}`);
-    },
-  });
+  useEffect(() => {
+    const t = setTimeout(() => setDebouncedSearch(search.trim()), 300);
+    return () => clearTimeout(t);
+  }, [search]);
+
+  const { data: exercisesList = [], isLoading } = useLibraryExercises(debouncedSearch, selectedMuscle);
 
   return (
-    <div className="mx-auto max-w-5xl px-4 py-8 sm:px-6 space-y-6">
-      <div className="flex flex-col sm:flex-row sm:items-center justify-between gap-4">
-        <div>
-          <div className="flex items-center gap-2 text-xs font-bold text-emerald-400 uppercase tracking-wider mb-1">
-            <BookOpen className="h-4 w-4" />
-            <span>Exercise Database</span>
-          </div>
-          <h1 className="text-3xl font-extrabold text-zinc-100">Exercise Library</h1>
-          <p className="text-sm text-zinc-400">Browse 35+ standard movements or track historical performance.</p>
-        </div>
-      </div>
+    <div className="mx-auto max-w-5xl px-4 sm:px-6 py-8 space-y-6">
+      {mode === 'guest' && <GuestBanner />}
+      <PageHeader
+        eyebrow="Movement database"
+        title="Exercises"
+        sub={mode === 'guest' ? '35+ movements available offline.' : 'Browse the library or review your history per lift.'}
+      />
 
-      {/* Search & Filters */}
-      <div className="flex flex-col sm:flex-row gap-3">
+      <div className="rise rise-1 flex flex-col sm:flex-row gap-3">
         <div className="relative flex-1">
-          <Search className="absolute left-3.5 top-3 h-4 w-4 text-zinc-400" />
-          <input
-            type="text"
-            placeholder="Search exercises by name..."
-            value={search}
-            onChange={e => setSearch(e.target.value)}
-            className="w-full rounded-2xl border border-zinc-800 bg-zinc-900/80 pl-10 pr-4 py-2.5 text-sm text-zinc-100 placeholder-zinc-500 focus:border-emerald-500 focus:outline-none"
-          />
+          <Search className="absolute left-4 top-1/2 h-4 w-4 -translate-y-1/2 text-zinc-500" />
+          <input type="text" placeholder="Search movements..." value={search} onChange={(e) => setSearch(e.target.value)}
+            className="field !rounded-2xl !py-3 pl-11" />
         </div>
-
-        <div className="flex items-center gap-1.5 overflow-x-auto pb-1">
-          {muscleGroups.map(m => (
-            <button
-              key={m.id}
-              onClick={() => setSelectedMuscle(m.id)}
-              className={`px-3.5 py-2 rounded-xl text-xs font-medium whitespace-nowrap transition-colors ${
-                selectedMuscle === m.id
-                  ? 'bg-emerald-500/20 text-emerald-400 border border-emerald-500/30 font-bold'
-                  : 'bg-zinc-900 text-zinc-400 hover:bg-zinc-800 hover:text-zinc-200 border border-zinc-800'
-              }`}
-            >
+        <div className="flex items-center gap-1.5 overflow-x-auto rounded-2xl border border-white/[0.06] bg-white/[0.02] p-1.5">
+          {muscleGroups.map((m) => (
+            <button key={m.id} onClick={() => setSelectedMuscle(m.id)}
+              className={`whitespace-nowrap rounded-xl px-3.5 py-2 text-xs font-bold transition-all ${
+                selectedMuscle === m.id ? 'bg-emerald-500 text-[#04120c]' : 'text-zinc-400 hover:text-white hover:bg-white/[0.06]'
+              }`}>
               {m.label}
             </button>
           ))}
         </div>
       </div>
 
-      {/* Exercises Grid */}
       {isLoading ? (
         <div className="p-12 text-center text-sm text-zinc-500">Loading exercise library...</div>
+      ) : exercisesList.length === 0 ? (
+        <EmptyState title="No matches" sub="Try a different search or muscle group." />
       ) : (
-        <div className="grid grid-cols-1 sm:grid-cols-2 lg:grid-cols-3 gap-4">
-          {exercisesList.map(ex => (
-            <Link
-              key={ex.id}
-              href={`/exercises/${ex.id}`}
-              className="flex items-start justify-between p-5 rounded-3xl border border-zinc-800/80 bg-zinc-900/50 hover:border-emerald-500/40 transition-all group"
-            >
+        <div className="grid grid-cols-1 sm:grid-cols-2 lg:grid-cols-3 gap-3">
+          {exercisesList.map((ex: any) => (
+            <Link key={ex.id} href={`/exercises/${ex.id}`}
+              className="glass group flex items-start justify-between rounded-3xl p-5 transition-all hover:border-emerald-500/30 hover:-translate-y-0.5">
               <div>
-                <h3 className="font-bold text-zinc-100 text-base group-hover:text-emerald-400 transition-colors">
-                  {ex.name}
-                </h3>
-                <div className="flex items-center gap-2 mt-2">
-                  <span className="inline-block rounded-lg bg-emerald-500/10 text-emerald-400 px-2.5 py-1 text-[10px] font-bold uppercase tracking-wider">
-                    {ex.muscleGroup}
-                  </span>
-                  <span className="inline-block rounded-lg bg-zinc-800 px-2.5 py-1 text-[10px] font-semibold text-zinc-400 capitalize">
-                    {ex.equipment}
-                  </span>
+                <h3 className="font-display font-bold text-white transition-colors group-hover:text-emerald-300">{ex.name}</h3>
+                <div className="mt-2 flex items-center gap-1.5">
+                  <span className="rounded-lg bg-emerald-500/10 px-2 py-1 text-[10px] font-bold uppercase tracking-wider text-emerald-300">{ex.muscleGroup}</span>
+                  <span className="rounded-lg bg-white/[0.05] px-2 py-1 text-[10px] font-semibold capitalize text-zinc-400">{ex.equipment}</span>
                 </div>
               </div>
-
-              <ChevronRight className="h-5 w-5 text-zinc-600 group-hover:text-emerald-400 transition-colors shrink-0" />
+              <ChevronRight className="h-5 w-5 shrink-0 text-zinc-600 transition-all group-hover:translate-x-0.5 group-hover:text-emerald-400" />
             </Link>
           ))}
         </div>

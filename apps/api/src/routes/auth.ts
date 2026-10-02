@@ -1,25 +1,34 @@
 import { FastifyInstance } from 'fastify';
 import { auth } from '@gym-tracker/auth';
 
+const HOP_BY_HOP = new Set(['host', 'content-length', 'connection', 'transfer-encoding']);
+
 export async function authRoutes(fastify: FastifyInstance) {
   fastify.all('/api/auth/*', async (request, reply) => {
     try {
-      const url = `${request.protocol}://${request.hostname}${request.raw.url}`;
-      
+      const proto = (request.headers['x-forwarded-proto'] as string) || request.protocol;
+      const url = `${proto}://${request.hostname}${request.raw.url}`;
+
       const headers = new Headers();
       for (const [key, value] of Object.entries(request.headers)) {
-        if (value) {
-          if (Array.isArray(value)) {
-            value.forEach(v => headers.append(key, v));
-          } else {
-            headers.set(key, value);
-          }
+        if (!value || HOP_BY_HOP.has(key.toLowerCase())) continue;
+        if (Array.isArray(value)) {
+          value.forEach((v) => headers.append(key, v));
+        } else {
+          headers.set(key, value);
         }
       }
 
+      const contentType = request.headers['content-type'] || '';
       let body: string | undefined = undefined;
-      if (!['GET', 'HEAD'].includes(request.method) && request.body) {
-        body = typeof request.body === 'string' ? request.body : JSON.stringify(request.body);
+      if (!['GET', 'HEAD'].includes(request.method) && request.body !== undefined) {
+        body =
+          typeof request.body === 'string'
+            ? request.body
+            : contentType.includes('application/x-www-form-urlencoded')
+              ? new URLSearchParams(request.body as Record<string, string>).toString()
+              : JSON.stringify(request.body);
+        if (!headers.has('content-type')) headers.set('content-type', 'application/json');
       }
 
       const req = new Request(url, {
@@ -30,62 +39,54 @@ export async function authRoutes(fastify: FastifyInstance) {
 
       const response = await auth.handler(req);
 
-      // Check if Better Auth failed due to offline DB (returns status 500)
-      if (response.status === 500 && (request.url.includes('sign-in') || request.url.includes('social'))) {
-        const googleClientId = process.env.GOOGLE_CLIENT_ID;
-        const hasRealKeys = googleClientId && !googleClientId.startsWith('mock-') && googleClientId !== 'your-google-client-id.apps.googleusercontent.com';
-
-        let targetUrl = 'http://localhost:3000/dashboard';
-        if (hasRealKeys) {
-          const redirectUri = encodeURIComponent('http://localhost:3001/api/auth/callback/google');
-          targetUrl = `https://accounts.google.com/o/oauth2/v2/auth?response_type=code&client_id=${googleClientId}&redirect_uri=${redirectUri}&scope=openid%20profile%20email`;
-        }
-
-        if (request.method === 'POST') {
-          return reply.status(200).send({ url: targetUrl });
-        }
-        return reply.redirect(targetUrl);
-      }
-
-      // Check for HTTP Redirect (302/307/Location header)
+      // Better Auth returns OAuth URL via Location header (often 200 + empty body for POST).
+      // Browsers/fetch clients expect JSON {url} on POST, redirect on GET.
       const location = response.headers.get('location');
       if (location) {
+        const setCookies = response.headers.getSetCookie?.() ?? [];
+        if (setCookies.length > 0) {
+          void reply.raw.setHeader('set-cookie', setCookies);
+        }
+        if (request.method === 'POST') {
+          reply.status(200);
+          response.headers.forEach((val, key) => {
+            const lower = key.toLowerCase();
+            if (lower === 'set-cookie' || lower === 'location' || lower === 'content-length' || lower === 'transfer-encoding') return;
+            reply.header(key, val);
+          });
+          return reply.send({ url: location });
+        }
+        reply.status(response.status);
+        response.headers.forEach((val, key) => {
+          const lower = key.toLowerCase();
+          if (lower === 'location' || lower === 'content-length' || lower === 'transfer-encoding') return;
+          if (lower === 'set-cookie') return; // already set above
+          reply.header(key, val);
+        });
         return reply.redirect(location);
       }
 
       reply.status(response.status);
+      const setCookies = response.headers.getSetCookie?.() ?? [];
+      if (setCookies.length > 0) {
+        void reply.raw.setHeader('set-cookie', setCookies);
+      }
       response.headers.forEach((val, key) => {
-        if (key.toLowerCase() !== 'transfer-encoding' && key.toLowerCase() !== 'content-length') {
-          reply.header(key, val);
-        }
+        const lower = key.toLowerCase();
+        if (lower === 'set-cookie' || lower === 'content-length' || lower === 'transfer-encoding') return;
+        reply.header(key, val);
       });
 
       const responseText = await response.text();
+      if (!responseText) return reply.send();
       try {
-        const parsed = JSON.parse(responseText);
-        if (parsed && parsed.url && request.method === 'GET') {
-          return reply.redirect(parsed.url);
-        }
-        return reply.send(parsed);
+        return reply.send(JSON.parse(responseText));
       } catch {
         return reply.send(responseText);
       }
     } catch (err: any) {
-      fastify.log.warn('Better Auth handler fallback:', err.message);
-
-      const googleClientId = process.env.GOOGLE_CLIENT_ID;
-      const hasRealKeys = googleClientId && !googleClientId.startsWith('mock-') && googleClientId !== 'your-google-client-id.apps.googleusercontent.com';
-
-      let targetUrl = 'http://localhost:3000/dashboard';
-      if (hasRealKeys) {
-        const redirectUri = encodeURIComponent('http://localhost:3001/api/auth/callback/google');
-        targetUrl = `https://accounts.google.com/o/oauth2/v2/auth?response_type=code&client_id=${googleClientId}&redirect_uri=${redirectUri}&scope=openid%20profile%20email`;
-      }
-
-      if (request.method === 'POST') {
-        return reply.status(200).send({ url: targetUrl });
-      }
-      return reply.redirect(targetUrl);
+      request.log.error(err, 'Better Auth handler failed');
+      return reply.status(500).send({ error: 'Authentication service unavailable. Check GOOGLE_CLIENT_ID/SECRET and DATABASE_URL.' });
     }
   });
 }

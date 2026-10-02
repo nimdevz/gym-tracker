@@ -1,9 +1,13 @@
 node_modules
 .next
+.open-next
+.wrangler
 dist
 build
 .turbo
 *.log
+*.tsbuildinfo
 .env
 !.env.example
 .ds_store
+.neon

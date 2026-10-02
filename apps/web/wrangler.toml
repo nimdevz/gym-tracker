@@ -1,0 +1,20 @@
+# Cloudflare Worker for the PulseFit web frontend (Next.js via OpenNext).
+# The Fastify API is NOT part of this Worker — it stays on a Node host and
+# the frontend reaches it over HTTPS via NEXT_PUBLIC_API_URL.
+
+name = "pulsefit-web"
+main = ".open-next/worker.js"
+compatibility_date = "2025-05-01"
+compatibility_flags = ["nodejs_compat"]
+
+# Build-time public env for the browser bundle.
+# IMPORTANT: set this to your deployed API host before `deploy`
+# (e.g. https://your-api.onrender.com). Can also be set via the
+# Cloudflare dashboard: Workers & Pages > pulsefit-web > Settings > Variables.
+[vars]
+NEXT_PUBLIC_API_URL = "http://localhost:3001"
+
+# Static assets served from the worker
+[assets]
+directory = ".open-next/assets"
+binding = "ASSETS"

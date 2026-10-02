@@ -2,30 +2,24 @@ import { FastifyInstance } from 'fastify';
 import { authenticate } from '../plugins/auth.js';
 import { db, bodyMeasurements, eq, and, desc } from '@gym-tracker/db';
 import { CreateBodyMeasurementSchema } from '@gym-tracker/validation';
-import { memoryStore, isDbAvailable } from '../services/store.js';
-import { BodyMeasurementData } from '@gym-tracker/types';
 
 export async function bodyMeasurementRoutes(fastify: FastifyInstance) {
-  // GET /api/body-measurements
+  // GET /api/body-measurements — this user's rows only, newest first
   fastify.get('/api/body-measurements', { preHandler: [authenticate] }, async (request, reply) => {
     const user = request.user!;
-
-    if (await isDbAvailable()) {
-      try {
-        const list = await db.query.bodyMeasurements.findMany({
-          where: eq(bodyMeasurements.userId, user.id),
-          orderBy: [desc(bodyMeasurements.date)],
-        });
-
-        if (list.length > 0) return reply.send(list);
-      } catch (err) {}
+    try {
+      const list = await db.query.bodyMeasurements.findMany({
+        where: eq(bodyMeasurements.userId, user.id),
+        orderBy: [desc(bodyMeasurements.date)],
+      });
+      return reply.send(list);
+    } catch (err) {
+      request.log.error(err, 'GET /api/body-measurements failed');
+      return reply.status(500).send({ error: 'Failed to load measurements' });
     }
-
-    const memList = memoryStore.bodyMeasurements.filter(b => b.userId === user.id);
-    return reply.send(memList);
   });
 
-  // POST /api/body-measurements
+  // POST /api/body-measurements — upsert on (userId, date)
   fastify.post('/api/body-measurements', { preHandler: [authenticate] }, async (request, reply) => {
     const user = request.user!;
     const parseResult = CreateBodyMeasurementSchema.safeParse(request.body);
@@ -36,64 +30,48 @@ export async function bodyMeasurementRoutes(fastify: FastifyInstance) {
 
     const data = parseResult.data;
 
-    if (await isDbAvailable()) {
-      try {
-        const existing = await db.query.bodyMeasurements.findFirst({
-          where: and(eq(bodyMeasurements.userId, user.id), eq(bodyMeasurements.date, data.date)),
-        });
+    try {
+      const existing = await db.query.bodyMeasurements.findFirst({
+        where: and(eq(bodyMeasurements.userId, user.id), eq(bodyMeasurements.date, data.date)),
+      });
 
-        if (existing) {
-          const [updated] = await db
-            .update(bodyMeasurements)
-            .set({ ...data })
-            .where(eq(bodyMeasurements.id, existing.id))
-            .returning();
+      if (existing) {
+        const [updated] = await db
+          .update(bodyMeasurements)
+          .set({ ...data })
+          .where(eq(bodyMeasurements.id, existing.id))
+          .returning();
+        return reply.send(updated);
+      }
 
-          if (updated) return reply.send(updated);
-        } else {
-          const [created] = await db
-            .insert(bodyMeasurements)
-            .values({
-              userId: user.id,
-              ...data,
-            })
-            .returning();
-
-          if (created) return reply.status(201).send(created);
-        }
-      } catch (err) {}
+      const [created] = await db
+        .insert(bodyMeasurements)
+        .values({ userId: user.id, ...data })
+        .returning();
+      return reply.status(201).send(created);
+    } catch (err: any) {
+      if (err?.code === '23505') {
+        return reply.status(409).send({ error: 'A measurement for this date already exists' });
+      }
+      request.log.error(err, 'POST /api/body-measurements failed');
+      return reply.status(500).send({ error: 'Failed to save measurement' });
     }
-
-    const newMemBm: BodyMeasurementData = {
-      id: `bm-${Date.now()}`,
-      userId: user.id,
-      date: data.date,
-      weightKg: data.weightKg ?? null,
-      bodyFatPercentage: data.bodyFatPercentage ?? null,
-      chestCm: data.chestCm ?? null,
-      waistCm: data.waistCm ?? null,
-      armsCm: data.armsCm ?? null,
-      thighsCm: data.thighsCm ?? null,
-      notes: data.notes ?? null,
-      createdAt: new Date().toISOString(),
-    };
-
-    memoryStore.bodyMeasurements.unshift(newMemBm);
-    return reply.status(201).send(newMemBm);
   });
 
-  // DELETE /api/body-measurements/:id
+  // DELETE /api/body-measurements/:id (owner only)
   fastify.delete('/api/body-measurements/:id', { preHandler: [authenticate] }, async (request, reply) => {
     const user = request.user!;
     const { id } = request.params as { id: string };
-
-    if (await isDbAvailable()) {
-      try {
-        await db.delete(bodyMeasurements).where(eq(bodyMeasurements.id, id));
-      } catch (err) {}
+    try {
+      const existing = await db.query.bodyMeasurements.findFirst({
+        where: and(eq(bodyMeasurements.id, id), eq(bodyMeasurements.userId, user.id)),
+      });
+      if (!existing) return reply.status(404).send({ error: 'Measurement not found' });
+      await db.delete(bodyMeasurements).where(and(eq(bodyMeasurements.id, id), eq(bodyMeasurements.userId, user.id)));
+      return reply.send({ success: true, message: 'Measurement deleted' });
+    } catch (err) {
+      request.log.error(err, 'DELETE /api/body-measurements/:id failed');
+      return reply.status(500).send({ error: 'Failed to delete measurement' });
     }
-
-    memoryStore.bodyMeasurements = memoryStore.bodyMeasurements.filter(b => b.id !== id);
-    return reply.send({ success: true, message: 'Measurement deleted' });
   });
 }

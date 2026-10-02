@@ -9,283 +9,264 @@ import {
   UpdateSetSchema,
 } from '@gym-tracker/validation';
 import { evaluateSetForPRs } from '@gym-tracker/intelligence';
-import { PRType, WorkoutData, WorkoutExerciseData, SetData } from '@gym-tracker/types';
-import { memoryStore, isDbAvailable } from '../services/store.js';
+
+function workoutDetails() {
+  return {
+    workoutExercises: {
+      orderBy: [asc(workoutExercises.order)],
+      with: {
+        exercise: true,
+        sets: { orderBy: [asc(sets.setNumber)] },
+      },
+    },
+  };
+}
+
+const workoutWithDetails = workoutDetails();
+
+/** Evaluate a completed set against this user's existing PRs and persist new ones. */
+async function persistNewPRs(userId: string, exerciseId: string, exerciseName: string, setRow: typeof sets.$inferSelect) {
+  if (!setRow.completed) return;
+  const existing = await db.query.personalRecords.findMany({
+    where: and(eq(personalRecords.userId, userId), eq(personalRecords.exerciseId, exerciseId)),
+  });
+  const found = evaluateSetForPRs(
+    exerciseId,
+    exerciseName,
+    {
+      id: setRow.id,
+      weight: setRow.weight,
+      reps: setRow.reps,
+      completed: setRow.completed,
+    } as any,
+    existing.map((p) => ({ recordType: p.recordType as any, weight: p.weight, reps: p.reps, estimated1RM: p.estimated1RM })),
+  );
+  for (const pr of found) {
+    // One row per record type: update if exists, insert otherwise.
+    const prev = existing.find((p) => p.recordType === pr.recordType);
+    if (prev) {
+      await db
+        .update(personalRecords)
+        .set({
+          weight: pr.weight,
+          reps: pr.reps,
+          estimated1RM: pr.estimated1RM,
+          setId: pr.setId,
+          achievedAt: new Date(),
+        })
+        .where(eq(personalRecords.id, prev.id));
+    } else {
+      await db.insert(personalRecords).values({
+        userId,
+        exerciseId,
+        recordType: pr.recordType,
+        weight: pr.weight,
+        reps: pr.reps,
+        estimated1RM: pr.estimated1RM,
+        setId: pr.setId,
+      });
+    }
+  }
+}
 
 export async function workoutRoutes(fastify: FastifyInstance) {
   // GET /api/workouts/active
   fastify.get('/api/workouts/active', { preHandler: [authenticate] }, async (request, reply) => {
     const user = request.user!;
-
-    if (await isDbAvailable()) {
-      try {
-        const activeWorkout = await db.query.workouts.findFirst({
-          where: and(eq(workouts.userId, user.id), eq(workouts.status, 'in_progress')),
-          with: {
-            workoutExercises: {
-              orderBy: [asc(workoutExercises.order)],
-              with: {
-                exercise: true,
-                sets: {
-                  orderBy: [asc(sets.setNumber)],
-                },
-              },
+    try {
+      const active = await db.query.workouts.findFirst({
+        where: and(eq(workouts.userId, user.id), eq(workouts.status, 'in_progress')),
+        with: {
+          workoutExercises: {
+            orderBy: [asc(workoutExercises.order)],
+            with: {
+              exercise: true,
+              sets: { orderBy: [asc(sets.setNumber)] },
             },
           },
-        });
-
-        if (activeWorkout) return reply.send(activeWorkout);
-      } catch (err) {}
+        },
+      });
+      return reply.send(active || null);
+    } catch (err) {
+      request.log.error(err, 'GET /api/workouts/active failed');
+      return reply.status(500).send({ error: 'Failed to load active workout' });
     }
-
-    const activeInMemory = memoryStore.workouts.find(w => w.userId === user.id && w.status === 'in_progress');
-    return reply.send(activeInMemory || null);
   });
 
-  // GET /api/workouts (History list)
+  // GET /api/workouts (completed history, newest first, capped)
   fastify.get('/api/workouts', { preHandler: [authenticate] }, async (request, reply) => {
     const user = request.user!;
-
-    if (await isDbAvailable()) {
-      try {
-        const list = await db.query.workouts.findMany({
-          where: and(eq(workouts.userId, user.id), eq(workouts.status, 'completed')),
-          orderBy: [desc(workouts.startTime)],
-          with: {
-            workoutExercises: {
-              orderBy: [asc(workoutExercises.order)],
-              with: {
-                exercise: true,
-                sets: {
-                  orderBy: [asc(sets.setNumber)],
-                },
-              },
+    const { limit } = request.query as { limit?: string };
+    const take = Math.min(Math.max(Number(limit) || 50, 1), 200);
+    try {
+      const list = await db.query.workouts.findMany({
+        where: and(eq(workouts.userId, user.id), eq(workouts.status, 'completed')),
+        orderBy: [desc(workouts.startTime)],
+        limit: take,
+        with: {
+          workoutExercises: {
+            orderBy: [asc(workoutExercises.order)],
+            with: {
+              exercise: true,
+              sets: { orderBy: [asc(sets.setNumber)] },
             },
           },
-        });
-
-        if (list.length > 0) return reply.send(list);
-      } catch (err) {}
+        },
+      });
+      return reply.send(list);
+    } catch (err) {
+      request.log.error(err, 'GET /api/workouts failed');
+      return reply.status(500).send({ error: 'Failed to load workouts' });
     }
-
-    const completedMem = memoryStore.workouts.filter(w => w.userId === user.id && w.status === 'completed');
-    return reply.send(completedMem);
   });
 
-  // POST /api/workouts (Start new workout)
+  // POST /api/workouts (start; returns existing active workout for this user)
   fastify.post('/api/workouts', { preHandler: [authenticate] }, async (request, reply) => {
     const user = request.user!;
     const parseResult = StartWorkoutSchema.safeParse(request.body || {});
-
     if (!parseResult.success) {
       return reply.status(400).send({ error: 'Validation Error', details: parseResult.error.format() });
     }
-
     const data = parseResult.data;
 
-    // Check active in memory
-    const activeInMemory = memoryStore.workouts.find(w => w.userId === user.id && w.status === 'in_progress');
-    if (activeInMemory) {
-      return reply.send(activeInMemory);
-    }
-
-    const templateExercises: Record<string, string[]> = {
-      'Chest & Upper Body': ['ex-bench-press', 'ex-incline-db', 'ex-tricep-pushdown'],
-      'Back & Pull Focus': ['ex-deadlift', 'ex-barbell-row', 'ex-barbell-curl'],
-      'Legs & Lower Body': ['ex-barbell-squat', 'ex-leg-press', 'ex-rdl'],
-    };
-
-    const initialExerciseIds = templateExercises[data.name || ''] || [];
-
-    if (await isDbAvailable()) {
-      try {
-        const [newWorkout] = await db
-          .insert(workouts)
-          .values({
-            userId: user.id,
-            name: data.name || 'Gym Workout',
-            notes: data.notes,
-            startTime: new Date(),
-            status: 'in_progress',
-          })
-          .returning();
-
-        const full = await db.query.workouts.findFirst({
-          where: eq(workouts.id, newWorkout.id),
-          with: {
-            workoutExercises: {
-              with: {
-                exercise: true,
-                sets: true,
-              },
+    try {
+      const existingActive = await db.query.workouts.findFirst({
+        where: and(eq(workouts.userId, user.id), eq(workouts.status, 'in_progress')),
+        with: {
+          workoutExercises: {
+            orderBy: [asc(workoutExercises.order)],
+            with: {
+              exercise: true,
+              sets: { orderBy: [asc(sets.setNumber)] },
             },
           },
-        });
+        },
+      });
+      if (existingActive) return reply.send(existingActive);
 
-        if (full) return reply.status(201).send(full);
-      } catch (err) {}
-    }
+      const [created] = await db
+        .insert(workouts)
+        .values({
+          userId: user.id,
+          name: data.name || 'Gym Workout',
+          notes: data.notes,
+          startTime: new Date(),
+          status: 'in_progress',
+        })
+        .returning();
 
-    const nowStr = new Date().toISOString();
-    const newWorkoutId = `w-${Date.now()}`;
-
-    const initialWEs: WorkoutExerciseData[] = initialExerciseIds.map((exId, idx) => {
-      const ex = memoryStore.exercises.find(e => e.id === exId) || memoryStore.exercises[0];
-      const weId = `we-${Date.now()}-${idx}`;
-      return {
-        id: weId,
-        workoutId: newWorkoutId,
-        exerciseId: ex.id,
-        order: idx,
-        notes: null,
-        exercise: ex,
-        sets: [
-          {
-            id: `s-${Date.now()}-${idx}-1`,
-            workoutExerciseId: weId,
-            setNumber: 1,
-            weight: 0,
-            reps: 0,
-            completed: false,
-            createdAt: nowStr,
+      const full = await db.query.workouts.findFirst({
+        where: eq(workouts.id, created.id),
+        with: {
+          workoutExercises: {
+            orderBy: [asc(workoutExercises.order)],
+            with: {
+              exercise: true,
+              sets: { orderBy: [asc(sets.setNumber)] },
+            },
           },
-        ],
-        createdAt: nowStr,
-      };
-    });
-
-    const newWorkoutMem: WorkoutData = {
-      id: newWorkoutId,
-      userId: user.id,
-      name: data.name || 'Gym Workout',
-      startTime: nowStr,
-      notes: data.notes || null,
-      status: 'in_progress',
-      workoutExercises: initialWEs,
-      createdAt: nowStr,
-      updatedAt: nowStr,
-    };
-
-    memoryStore.workouts.unshift(newWorkoutMem);
-    return reply.status(201).send(newWorkoutMem);
+        },
+      });
+      return reply.status(201).send(full);
+    } catch (err) {
+      request.log.error(err, 'POST /api/workouts failed');
+      return reply.status(500).send({ error: 'Failed to start workout' });
+    }
   });
 
-  // GET /api/workouts/:id
+  // GET /api/workouts/:id (owner only)
   fastify.get('/api/workouts/:id', { preHandler: [authenticate] }, async (request, reply) => {
     const user = request.user!;
     const { id } = request.params as { id: string };
-
-    if (await isDbAvailable()) {
-      try {
-        const workout = await db.query.workouts.findFirst({
-          where: and(eq(workouts.id, id), eq(workouts.userId, user.id)),
-          with: {
-            workoutExercises: {
-              orderBy: [asc(workoutExercises.order)],
-              with: {
-                exercise: true,
-                sets: {
-                  orderBy: [asc(sets.setNumber)],
-                },
-              },
+    try {
+      const workout = await db.query.workouts.findFirst({
+        where: and(eq(workouts.id, id), eq(workouts.userId, user.id)),
+        with: {
+          workoutExercises: {
+            orderBy: [asc(workoutExercises.order)],
+            with: {
+              exercise: true,
+              sets: { orderBy: [asc(sets.setNumber)] },
             },
           },
-        });
-
-        if (workout) return reply.send(workout);
-      } catch (err) {}
+        },
+      });
+      if (!workout) return reply.status(404).send({ error: 'Workout not found' });
+      return reply.send(workout);
+    } catch (err) {
+      request.log.error(err, 'GET /api/workouts/:id failed');
+      return reply.status(500).send({ error: 'Failed to load workout' });
     }
-
-    const mem = memoryStore.workouts.find(w => w.id === id && w.userId === user.id);
-    if (!mem) return reply.status(404).send({ error: 'Workout not found' });
-    return reply.send(mem);
   });
 
-  // PUT /api/workouts/:id (Complete/update workout)
+  // PUT /api/workouts/:id (complete/update, owner only)
   fastify.put('/api/workouts/:id', { preHandler: [authenticate] }, async (request, reply) => {
     const user = request.user!;
     const { id } = request.params as { id: string };
     const parseResult = UpdateWorkoutSchema.safeParse(request.body);
-
     if (!parseResult.success) {
       return reply.status(400).send({ error: 'Validation Error', details: parseResult.error.format() });
     }
-
     const data = parseResult.data;
     const now = new Date();
 
-    if (await isDbAvailable()) {
-      try {
-        const existing = await db.query.workouts.findFirst({
-          where: and(eq(workouts.id, id), eq(workouts.userId, user.id)),
-        });
+    try {
+      const existing = await db.query.workouts.findFirst({
+        where: and(eq(workouts.id, id), eq(workouts.userId, user.id)),
+      });
+      if (!existing) return reply.status(404).send({ error: 'Workout not found' });
 
-        if (existing) {
-          let durationSeconds = existing.durationSeconds;
-          if (data.status === 'completed' && !durationSeconds) {
-            durationSeconds = Math.round((now.getTime() - new Date(existing.startTime).getTime()) / 1000);
-          }
+      let durationSeconds = existing.durationSeconds;
+      if (data.status === 'completed' && !durationSeconds) {
+        durationSeconds = Math.max(0, Math.round((now.getTime() - new Date(existing.startTime).getTime()) / 1000));
+      }
 
-          const [updated] = await db
-            .update(workouts)
-            .set({
-              ...(data.name ? { name: data.name } : {}),
-              ...(data.notes !== undefined ? { notes: data.notes } : {}),
-              ...(data.status ? { status: data.status } : {}),
-              ...(data.status === 'completed' ? { endTime: now, durationSeconds } : {}),
-              updatedAt: now,
-            })
-            .where(and(eq(workouts.id, id), eq(workouts.userId, user.id)))
-            .returning();
+      const [updated] = await db
+        .update(workouts)
+        .set({
+          ...(data.name ? { name: data.name } : {}),
+          ...(data.notes !== undefined ? { notes: data.notes } : {}),
+          ...(data.status ? { status: data.status } : {}),
+          ...(data.status === 'completed' ? { endTime: now, durationSeconds } : {}),
+          updatedAt: now,
+        })
+        .where(and(eq(workouts.id, id), eq(workouts.userId, user.id)))
+        .returning();
 
-          const full = await db.query.workouts.findFirst({
-            where: eq(workouts.id, updated.id),
+      const full = await db.query.workouts.findFirst({
+        where: eq(workouts.id, updated.id),
+        with: {
+          workoutExercises: {
+            orderBy: [asc(workoutExercises.order)],
             with: {
-              workoutExercises: {
-                orderBy: [asc(workoutExercises.order)],
-                with: {
-                  exercise: true,
-                  sets: {
-                    orderBy: [asc(sets.setNumber)],
-                  },
-                },
-              },
+              exercise: true,
+              sets: { orderBy: [asc(sets.setNumber)] },
             },
-          });
-
-          if (full) return reply.send(full);
-        }
-      } catch (err) {}
+          },
+        },
+      });
+      return reply.send(full);
+    } catch (err) {
+      request.log.error(err, 'PUT /api/workouts/:id failed');
+      return reply.status(500).send({ error: 'Failed to update workout' });
     }
-
-    const mem = memoryStore.workouts.find(w => w.id === id && w.userId === user.id);
-    if (!mem) return reply.status(404).send({ error: 'Workout not found' });
-
-    if (data.name) mem.name = data.name;
-    if (data.notes !== undefined) mem.notes = data.notes;
-    if (data.status) mem.status = data.status;
-    if (data.status === 'completed') {
-      mem.endTime = now.toISOString();
-      mem.durationSeconds = Math.round((now.getTime() - new Date(mem.startTime).getTime()) / 1000);
-    }
-    mem.updatedAt = now.toISOString();
-
-    return reply.send(mem);
   });
 
-  // DELETE /api/workouts/:id
+  // DELETE /api/workouts/:id (owner only)
   fastify.delete('/api/workouts/:id', { preHandler: [authenticate] }, async (request, reply) => {
     const user = request.user!;
     const { id } = request.params as { id: string };
-
-    if (await isDbAvailable()) {
-      try {
-        await db.delete(workouts).where(and(eq(workouts.id, id), eq(workouts.userId, user.id)));
-      } catch (err) {}
+    try {
+      const existing = await db.query.workouts.findFirst({
+        where: and(eq(workouts.id, id), eq(workouts.userId, user.id)),
+      });
+      if (!existing) return reply.status(404).send({ error: 'Workout not found' });
+      await db.delete(workouts).where(and(eq(workouts.id, id), eq(workouts.userId, user.id)));
+      return reply.send({ success: true, message: 'Workout deleted' });
+    } catch (err) {
+      request.log.error(err, 'DELETE /api/workouts/:id failed');
+      return reply.status(500).send({ error: 'Failed to delete workout' });
     }
-
-    memoryStore.workouts = memoryStore.workouts.filter(w => w.id !== id);
-    return reply.send({ success: true, message: 'Workout deleted' });
   });
 
   // POST /api/workouts/:id/exercises
@@ -293,229 +274,196 @@ export async function workoutRoutes(fastify: FastifyInstance) {
     const user = request.user!;
     const { id: workoutId } = request.params as { id: string };
     const parseResult = AddWorkoutExerciseSchema.safeParse(request.body);
-
     if (!parseResult.success) {
       return reply.status(400).send({ error: 'Validation Error', details: parseResult.error.format() });
     }
-
     const data = parseResult.data;
 
-    if (await isDbAvailable()) {
-      try {
-        const workout = await db.query.workouts.findFirst({
-          where: and(eq(workouts.id, workoutId), eq(workouts.userId, user.id)),
-          with: { workoutExercises: true },
-        });
+    try {
+      const workout = await db.query.workouts.findFirst({
+        where: and(eq(workouts.userId, user.id), eq(workouts.id, workoutId)),
+        with: { workoutExercises: true },
+      });
+      if (!workout) return reply.status(404).send({ error: 'Workout not found' });
+      if (workout.status !== 'in_progress') {
+        return reply.status(400).send({ error: 'Cannot modify a completed workout' });
+      }
 
-        if (workout) {
-          const nextOrder = data.order ?? workout.workoutExercises.length;
-          const [we] = await db
-            .insert(workoutExercises)
-            .values({
-              workoutId,
-              exerciseId: data.exerciseId,
-              order: nextOrder,
-              notes: data.notes,
-            })
-            .returning();
+      const exercise = await db.query.exercises.findFirst({
+        where: eq(exercises.id, data.exerciseId),
+      });
+      if (!exercise) return reply.status(404).send({ error: 'Exercise not found' });
 
-          await db.insert(sets).values({
-            workoutExerciseId: we.id,
-            setNumber: 1,
-            weight: 0,
-            reps: 0,
-            completed: false,
-          });
+      const [we] = await db
+        .insert(workoutExercises)
+        .values({
+          workoutId,
+          exerciseId: data.exerciseId,
+          order: data.order ?? workout.workoutExercises.length,
+          notes: data.notes,
+        })
+        .returning();
 
-          const fullWE = await db.query.workoutExercises.findFirst({
-            where: eq(workoutExercises.id, we.id),
-            with: {
-              exercise: true,
-              sets: {
-                orderBy: [asc(sets.setNumber)],
-              },
-            },
-          });
+      await db.insert(sets).values({
+        workoutExerciseId: we.id,
+        setNumber: 1,
+        weight: 0,
+        reps: 0,
+        completed: false,
+      });
 
-          if (fullWE) return reply.status(201).send(fullWE);
-        }
-      } catch (err) {}
+      const fullWE = await db.query.workoutExercises.findFirst({
+        where: eq(workoutExercises.id, we.id),
+        with: { exercise: true, sets: { orderBy: [asc(sets.setNumber)] } },
+      });
+      return reply.status(201).send(fullWE);
+    } catch (err) {
+      request.log.error(err, 'POST /api/workouts/:id/exercises failed');
+      return reply.status(500).send({ error: 'Failed to add exercise' });
     }
-
-    const memWorkout = memoryStore.workouts.find(w => w.id === workoutId && w.userId === user.id);
-    if (!memWorkout) return reply.status(404).send({ error: 'Workout not found' });
-
-    const targetEx = memoryStore.exercises.find(e => e.id === data.exerciseId) || {
-      id: data.exerciseId,
-      name: 'Bench Press',
-      muscleGroup: 'chest' as const,
-      equipment: 'barbell' as const,
-      exerciseType: 'weight_reps' as const,
-      createdAt: new Date().toISOString(),
-    };
-
-    const newWeId = `we-${Date.now()}`;
-    const newWE: WorkoutExerciseData = {
-      id: newWeId,
-      workoutId,
-      exerciseId: data.exerciseId,
-      order: memWorkout.workoutExercises.length,
-      notes: data.notes || null,
-      exercise: targetEx,
-      sets: [
-        {
-          id: `s-${Date.now()}`,
-          workoutExerciseId: newWeId,
-          setNumber: 1,
-          weight: 0,
-          reps: 0,
-          completed: false,
-          createdAt: new Date().toISOString(),
-        },
-      ],
-      createdAt: new Date().toISOString(),
-    };
-
-    memWorkout.workoutExercises.push(newWE);
-    return reply.status(201).send(newWE);
   });
 
-  // DELETE /api/workouts/:id/exercises/:weId
+  // DELETE /api/workouts/:id/exercises/:weId (owner only)
   fastify.delete('/api/workouts/:id/exercises/:weId', { preHandler: [authenticate] }, async (request, reply) => {
     const user = request.user!;
     const { id: workoutId, weId } = request.params as { id: string; weId: string };
-
-    if (await isDbAvailable()) {
-      try {
-        await db.delete(workoutExercises).where(eq(workoutExercises.id, weId));
-      } catch (err) {}
+    try {
+      const owned = await db.query.workoutExercises.findFirst({
+        where: eq(workoutExercises.id, weId),
+        with: { workout: true },
+      });
+      if (!owned || (owned as any).workoutId !== workoutId) {
+        return reply.status(404).send({ error: 'Exercise not found' });
+      }
+      if ((owned as any).workout?.userId !== user.id) {
+        return reply.status(403).send({ error: 'Forbidden' });
+      }
+      await db.delete(workoutExercises).where(eq(workoutExercises.id, weId));
+      return reply.send({ success: true, message: 'Exercise removed' });
+    } catch (err) {
+      request.log.error(err, 'DELETE workout exercise failed');
+      return reply.status(500).send({ error: 'Failed to remove exercise' });
     }
-
-    const memWorkout = memoryStore.workouts.find(w => w.id === workoutId);
-    if (memWorkout) {
-      memWorkout.workoutExercises = memWorkout.workoutExercises.filter(we => we.id !== weId);
-    }
-
-    return reply.send({ success: true, message: 'Exercise removed' });
   });
 
   // POST /api/workouts/:id/sets
   fastify.post('/api/workouts/:id/sets', { preHandler: [authenticate] }, async (request, reply) => {
     const user = request.user!;
     const { id: workoutId } = request.params as { id: string };
-    const { workoutExerciseId, setNumber, weight, reps, rir, completed } = request.body as any;
+    const raw = request.body as any;
+    const workoutExerciseId: string | undefined = raw?.workoutExerciseId;
+    if (!workoutExerciseId) {
+      return reply.status(400).send({ error: 'workoutExerciseId is required' });
+    }
+    const parseResult = CreateSetSchema.safeParse(raw);
+    if (!parseResult.success) {
+      return reply.status(400).send({ error: 'Validation Error', details: parseResult.error.format() });
+    }
+    const { setNumber, weight, reps, rir, completed } = parseResult.data as any;
 
-    if (await isDbAvailable()) {
+    try {
+      const we = await db.query.workoutExercises.findFirst({
+        where: eq(workoutExercises.id, workoutExerciseId),
+        with: { workout: true, exercise: true },
+      });
+      if (!we || (we as any).workoutId !== workoutId || (we as any).workout?.userId !== user.id) {
+        return reply.status(404).send({ error: 'Workout exercise not found' });
+      }
+      const [newSet] = await db
+        .insert(sets)
+        .values({
+          workoutExerciseId,
+          setNumber: setNumber || 1,
+          weight: weight ?? 0,
+          reps: reps ?? 0,
+          rir: rir ?? null,
+          completed: completed ?? false,
+        })
+        .returning();
+
       try {
-        const [newSet] = await db
-          .insert(sets)
-          .values({
-            workoutExerciseId,
-            setNumber: setNumber || 1,
-            weight: weight || 0,
-            reps: reps || 0,
-            rir: rir ?? null,
-            completed: completed ?? false,
-          })
-          .returning();
+        await persistNewPRs(user.id, we.exerciseId, (we as any).exercise?.name || 'Exercise', newSet);
+      } catch (prErr) {
+        request.log.warn(prErr, 'PR evaluation failed (non-fatal)');
+      }
 
-        if (newSet) return reply.status(201).send(newSet);
-      } catch (err) {}
+      return reply.status(201).send(newSet);
+    } catch (err) {
+      request.log.error(err, 'POST set failed');
+      return reply.status(500).send({ error: 'Failed to add set' });
     }
-
-    const memWorkout = memoryStore.workouts.find(w => w.id === workoutId);
-    const memWE = memWorkout?.workoutExercises.find(we => we.id === workoutExerciseId);
-
-    const newSetMem: SetData = {
-      id: `s-${Date.now()}`,
-      workoutExerciseId,
-      setNumber: setNumber || (memWE?.sets.length || 0) + 1,
-      weight: weight || 0,
-      reps: reps || 0,
-      rir: rir ?? 2,
-      completed: completed ?? false,
-      createdAt: new Date().toISOString(),
-    };
-
-    if (memWE) {
-      memWE.sets.push(newSetMem);
-    }
-
-    return reply.status(201).send(newSetMem);
   });
 
-  // PUT /api/workouts/:id/sets/:setId
+  // PUT /api/workouts/:id/sets/:setId (owner only)
   fastify.put('/api/workouts/:id/sets/:setId', { preHandler: [authenticate] }, async (request, reply) => {
     const user = request.user!;
     const { id: workoutId, setId } = request.params as { id: string; setId: string };
     const parseResult = UpdateSetSchema.safeParse(request.body);
-
     if (!parseResult.success) {
       return reply.status(400).send({ error: 'Validation Error', details: parseResult.error.format() });
     }
-
     const data = parseResult.data;
 
-    if (await isDbAvailable()) {
-      try {
-        const [updatedSet] = await db
-          .update(sets)
-          .set({
-            ...(data.setNumber !== undefined ? { setNumber: data.setNumber } : {}),
-            ...(data.weight !== undefined ? { weight: data.weight } : {}),
-            ...(data.reps !== undefined ? { reps: data.reps } : {}),
-            ...(data.rir !== undefined ? { rir: data.rir } : {}),
-            ...(data.completed !== undefined ? { completed: data.completed } : {}),
-          })
-          .where(eq(sets.id, setId))
-          .returning();
-
-        if (updatedSet) return reply.send(updatedSet);
-      } catch (err) {}
-    }
-
-    const memWorkout = memoryStore.workouts.find(w => w.id === workoutId);
-    let targetSet: SetData | undefined = undefined;
-
-    if (memWorkout) {
-      for (const we of memWorkout.workoutExercises) {
-        const found = we.sets.find(s => s.id === setId);
-        if (found) {
-          targetSet = found;
-          break;
-        }
+    try {
+      const existing = await db.query.sets.findFirst({
+        where: eq(sets.id, setId),
+        with: { workoutExercise: { with: { workout: true, exercise: true } } },
+      });
+      if (!existing) return reply.status(404).send({ error: 'Set not found' });
+      const ownerId = (existing as any)?.workoutExercise?.workout?.userId;
+      const parentWorkoutId = (existing as any)?.workoutExercise?.workoutId;
+      if (ownerId !== user.id || parentWorkoutId !== workoutId) {
+        return reply.status(403).send({ error: 'Forbidden' });
       }
-    }
+      const [updatedSet] = await db
+        .update(sets)
+        .set({
+          ...(data.setNumber !== undefined ? { setNumber: data.setNumber } : {}),
+          ...(data.weight !== undefined ? { weight: data.weight } : {}),
+          ...(data.reps !== undefined ? { reps: data.reps } : {}),
+          ...(data.rir !== undefined ? { rir: data.rir } : {}),
+          ...(data.completed !== undefined ? { completed: data.completed } : {}),
+        })
+        .where(eq(sets.id, setId))
+        .returning();
 
-    if (targetSet) {
-      if (data.weight !== undefined) targetSet.weight = data.weight;
-      if (data.reps !== undefined) targetSet.reps = data.reps;
-      if (data.rir !== undefined) targetSet.rir = data.rir;
-      if (data.completed !== undefined) targetSet.completed = data.completed;
-      return reply.send(targetSet);
-    }
+      try {
+        await persistNewPRs(
+          user.id,
+          (existing as any).workoutExercise.exerciseId,
+          (existing as any).workoutExercise?.exercise?.name || 'Exercise',
+          updatedSet,
+        );
+      } catch (prErr) {
+        request.log.warn(prErr, 'PR evaluation failed (non-fatal)');
+      }
 
-    return reply.send({ id: setId, ...data, completed: data.completed ?? true });
+      return reply.send(updatedSet);
+    } catch (err) {
+      request.log.error(err, 'PUT set failed');
+      return reply.status(500).send({ error: 'Failed to update set' });
+    }
   });
 
-  // DELETE /api/workouts/:id/sets/:setId
+  // DELETE /api/workouts/:id/sets/:setId (owner only)
   fastify.delete('/api/workouts/:id/sets/:setId', { preHandler: [authenticate] }, async (request, reply) => {
     const user = request.user!;
-    const { id: workoutId, setId } = request.params as { id: string; setId: string };
-
-    if (await isDbAvailable()) {
-      try {
-        await db.delete(sets).where(eq(sets.id, setId));
-      } catch (err) {}
-    }
-
-    const memWorkout = memoryStore.workouts.find(w => w.id === workoutId);
-    if (memWorkout) {
-      for (const we of memWorkout.workoutExercises) {
-        we.sets = we.sets.filter(s => s.id !== setId);
+    const { setId } = request.params as { id: string; setId: string };
+    try {
+      const existing = await db.query.sets.findFirst({
+        where: eq(sets.id, setId),
+        with: { workoutExercise: { with: { workout: true } } },
+      });
+      if (!existing) return reply.status(404).send({ error: 'Set not found' });
+      if ((existing as any)?.workoutExercise?.workout?.userId !== user.id) {
+        return reply.status(403).send({ error: 'Forbidden' });
       }
+      await db.delete(sets).where(eq(sets.id, setId));
+      return reply.send({ success: true, message: 'Set deleted' });
+    } catch (err) {
+      request.log.error(err, 'DELETE set failed');
+      return reply.status(500).send({ error: 'Failed to delete set' });
     }
-
-    return reply.send({ success: true, message: 'Set deleted' });
   });
 }
+

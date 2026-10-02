@@ -1,132 +1,95 @@
 'use client';
 
-import React, { useEffect } from 'react';
+import React from 'react';
 import { useRouter } from 'next/navigation';
-import { useQuery, useMutation } from '@tanstack/react-query';
-import { apiFetch } from '@/lib/api';
-import { WorkoutData } from '@gym-tracker/types';
-import { PlayCircle, Plus, Dumbbell, Sparkles } from 'lucide-react';
+import { useActiveWorkout, useWorkoutMutations, useAuthMode } from '@/lib/use-data';
+import { PlayCircle, Plus, Dumbbell, Sparkles, ArrowRight } from 'lucide-react';
+import { Card, GuestBanner, PageHeader } from '@/components/ui';
+
+const TEMPLATES = [
+  { name: 'Gym Workout', title: 'Empty workout', desc: 'Blank log — add exercises on the fly.', featured: true },
+  { name: 'Chest & Upper Body', title: 'Chest & upper body', desc: 'Bench, incline press, flys & pushdowns.', featured: false },
+  { name: 'Back & Pull Focus', title: 'Back & pull focus', desc: 'Deadlifts, rows, pulldowns & curls.', featured: false },
+  { name: 'Legs & Lower Body', title: 'Legs & lower body', desc: 'Squats, leg press, RDLs & calves.', featured: false },
+];
 
 export default function WorkoutLaunchPage() {
   const router = useRouter();
+  const { mode } = useAuthMode();
+  const { data: activeWorkout, isLoading } = useActiveWorkout();
+  const mutations = useWorkoutMutations();
+  const [starting, setStarting] = React.useState(false);
+  const [startError, setStartError] = React.useState<string | null>(null);
 
-  const { data: activeWorkout, isLoading } = useQuery<WorkoutData | null>({
-    queryKey: ['activeWorkout'],
-    queryFn: () => apiFetch('/api/workouts/active'),
-  });
-
-  useEffect(() => {
-    if (activeWorkout) {
-      router.push(`/workout/${activeWorkout.id}`);
-    }
+  React.useEffect(() => {
+    if (activeWorkout) router.push(`/workout/${activeWorkout.id}`);
   }, [activeWorkout, router]);
 
-  const startMutation = useMutation({
-    mutationFn: (name: string) =>
-      apiFetch('/api/workouts', {
-        method: 'POST',
-        body: JSON.stringify({ name }),
-      }),
-    onSuccess: (newWorkout) => {
-      router.push(`/workout/${newWorkout.id}`);
-    },
-  });
-
-  const handleStartNew = (templateName: string) => {
-    startMutation.mutate(templateName);
+  const handleStart = async (templateName: string) => {
+    try {
+      setStarting(true);
+      setStartError(null);
+      const w: any = await mutations.startWorkout(templateName);
+      router.push(`/workout/${w.id}`);
+    } catch {
+      setStartError('Could not start workout. Please try again.');
+    } finally {
+      setStarting(false);
+    }
   };
 
   if (isLoading) {
-    return (
-      <div className="flex h-[70vh] items-center justify-center text-sm text-zinc-500">
-        Checking active workout status...
-      </div>
-    );
+    return <div className="flex h-[70vh] items-center justify-center text-sm text-zinc-500">Checking active session...</div>;
   }
 
   return (
-    <div className="mx-auto max-w-4xl px-4 py-12 sm:px-6 space-y-8">
-      <div className="text-center space-y-2">
-        <div className="inline-flex items-center gap-2 px-3.5 py-1.5 rounded-full bg-emerald-500/10 border border-emerald-500/20 text-xs font-semibold text-emerald-400">
-          <Sparkles className="h-4 w-4" />
-          <span>Gym Logger V1</span>
-        </div>
-        <h1 className="text-3xl sm:text-4xl font-extrabold text-zinc-100">Start Workout</h1>
-        <p className="text-sm text-zinc-400">Select a template or begin a blank workout session.</p>
-      </div>
+    <div className="mx-auto max-w-4xl px-4 sm:px-6 py-8 space-y-6">
+      {mode === 'guest' && <GuestBanner />}
+      <PageHeader
+        eyebrow="Gym logger"
+        title="Start workout"
+        sub={mode === 'guest' ? 'Training locally — sign in anytime to save to your account.' : 'Pick a template or start blank. Your session saves automatically.'}
+      />
+
+      {startError && (
+        <div className="rounded-2xl border border-rose-500/30 bg-rose-500/10 px-4 py-3 text-sm text-rose-300">{startError}</div>
+      )}
 
       <div className="grid grid-cols-1 sm:grid-cols-2 gap-4">
-        <button
-          onClick={() => handleStartNew('Gym Workout')}
-          disabled={startMutation.isPending}
-          className="flex flex-col items-start justify-between p-6 rounded-3xl border border-emerald-500/30 bg-gradient-to-br from-emerald-950/40 via-zinc-900 to-zinc-950 hover:border-emerald-500/60 transition-all text-left group shadow-xl"
-        >
-          <div className="flex h-12 w-12 items-center justify-center rounded-2xl bg-emerald-500/20 text-emerald-400 group-hover:bg-emerald-500 group-hover:text-zinc-950 transition-colors mb-4">
-            <Plus className="h-6 w-6" />
-          </div>
-          <div>
-            <h3 className="text-lg font-bold text-zinc-100 group-hover:text-emerald-400 transition-colors">
-              Empty Workout
-            </h3>
-            <p className="text-xs text-zinc-400 mt-1">
-              Start with a blank workout log and add exercises on the fly.
-            </p>
-          </div>
-        </button>
+        {TEMPLATES.map((t, i) => (
+          <button
+            key={t.name}
+            onClick={() => handleStart(t.name)}
+            disabled={starting}
+            className={`rise text-left rounded-3xl border p-6 transition-all hover:-translate-y-0.5 disabled:opacity-60 ${
+              t.featured
+                ? 'border-emerald-500/30 bg-gradient-to-br from-emerald-950/50 via-[#0c0e14] to-[#0c0e14] hover:border-emerald-500/50'
+                : 'glass hover:border-white/20'
+            } ${i === 0 ? 'rise-1' : i === 1 ? 'rise-2' : i === 2 ? 'rise-3' : 'rise-4'}`}
+          >
+            <div className={`mb-4 flex h-12 w-12 items-center justify-center rounded-2xl ${
+              t.featured ? 'bg-gradient-to-b from-emerald-400 to-emerald-600 text-[#04120c]' : 'bg-white/[0.06] text-zinc-300'
+            }`}>
+              {t.featured ? <Plus className="h-6 w-6" /> : <Dumbbell className="h-6 w-6" />}
+            </div>
+            <h3 className="font-display text-lg font-bold text-white">{t.title}</h3>
+            <p className="mt-1 text-xs text-zinc-400">{t.desc}</p>
+            <span className="mt-4 inline-flex items-center gap-1 text-xs font-bold text-emerald-400">
+              Begin <ArrowRight className="h-3.5 w-3.5" />
+            </span>
+          </button>
+        ))}
+      </div>
 
-        <button
-          onClick={() => handleStartNew('Chest & Triceps')}
-          disabled={startMutation.isPending}
-          className="flex flex-col items-start justify-between p-6 rounded-3xl border border-zinc-800 bg-zinc-900/50 hover:border-zinc-700 transition-all text-left group"
-        >
-          <div className="flex h-12 w-12 items-center justify-center rounded-2xl bg-zinc-800 text-zinc-300 group-hover:bg-emerald-500/10 group-hover:text-emerald-400 transition-colors mb-4">
-            <Dumbbell className="h-6 w-6" />
-          </div>
-          <div>
-            <h3 className="text-lg font-bold text-zinc-100 group-hover:text-emerald-400 transition-colors">
-              Chest & Upper Body
-            </h3>
-            <p className="text-xs text-zinc-400 mt-1">
-              Bench Press, Incline Press, Cable Flys & Pushdowns.
-            </p>
-          </div>
-        </button>
+      <Card className="flex items-center gap-3 !p-4">
+        <Sparkles className="h-5 w-5 shrink-0 text-emerald-400" />
+        <p className="text-xs leading-relaxed text-zinc-400">
+          Sets, rest timers and PRs track live during your session. Finish the workout to lock it into history and update progress everywhere.
+        </p>
+      </Card>
 
-        <button
-          onClick={() => handleStartNew('Back & Biceps')}
-          disabled={startMutation.isPending}
-          className="flex flex-col items-start justify-between p-6 rounded-3xl border border-zinc-800 bg-zinc-900/50 hover:border-zinc-700 transition-all text-left group"
-        >
-          <div className="flex h-12 w-12 items-center justify-center rounded-2xl bg-zinc-800 text-zinc-300 group-hover:bg-emerald-500/10 group-hover:text-emerald-400 transition-colors mb-4">
-            <Dumbbell className="h-6 w-6" />
-          </div>
-          <div>
-            <h3 className="text-lg font-bold text-zinc-100 group-hover:text-emerald-400 transition-colors">
-              Back & Pull Focus
-            </h3>
-            <p className="text-xs text-zinc-400 mt-1">
-              Deadlifts, Barbell Rows, Lat Pulldowns & Curls.
-            </p>
-          </div>
-        </button>
-
-        <button
-          onClick={() => handleStartNew('Legs & Core')}
-          disabled={startMutation.isPending}
-          className="flex flex-col items-start justify-between p-6 rounded-3xl border border-zinc-800 bg-zinc-900/50 hover:border-zinc-700 transition-all text-left group"
-        >
-          <div className="flex h-12 w-12 items-center justify-center rounded-2xl bg-zinc-800 text-zinc-300 group-hover:bg-emerald-500/10 group-hover:text-emerald-400 transition-colors mb-4">
-            <Dumbbell className="h-6 w-6" />
-          </div>
-          <div>
-            <h3 className="text-lg font-bold text-zinc-100 group-hover:text-emerald-400 transition-colors">
-              Legs & Lower Body
-            </h3>
-            <p className="text-xs text-zinc-400 mt-1">
-              Squats, Leg Press, Romanian Deadlifts & Calf Raises.
-            </p>
-          </div>
-        </button>
+      <div className="hidden">
+        <PlayCircle className="h-4 w-4" />
       </div>
     </div>
   );

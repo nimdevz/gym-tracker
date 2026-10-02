@@ -1,7 +1,7 @@
 'use client';
 
-import React, { useState, useEffect } from 'react';
-import { Timer, SkipForward, Plus, X } from 'lucide-react';
+import React, { useState, useEffect, useRef } from 'react';
+import { Timer, SkipForward, Plus } from 'lucide-react';
 
 interface RestTimerProps {
   initialSeconds?: number;
@@ -11,6 +11,8 @@ interface RestTimerProps {
 export function RestTimer({ initialSeconds = 90, onFinish }: RestTimerProps) {
   const [timeLeft, setTimeLeft] = useState(initialSeconds);
   const [isRunning, setIsRunning] = useState(true);
+  const onFinishRef = useRef(onFinish);
+  onFinishRef.current = onFinish;
 
   useEffect(() => {
     setTimeLeft(initialSeconds);
@@ -18,21 +20,24 @@ export function RestTimer({ initialSeconds = 90, onFinish }: RestTimerProps) {
   }, [initialSeconds]);
 
   useEffect(() => {
-    if (!isRunning || timeLeft <= 0) return;
-
+    if (!isRunning) return;
+    if (timeLeft <= 0) {
+      setIsRunning(false);
+      onFinishRef.current?.();
+      return;
+    }
     const interval = setInterval(() => {
-      setTimeLeft(prev => {
-        if (prev <= 1) {
-          setIsRunning(false);
-          if (onFinish) onFinish();
-          return 0;
-        }
-        return prev - 1;
-      });
+      setTimeLeft((prev) => (prev <= 1 ? 0 : prev - 1));
     }, 1000);
-
     return () => clearInterval(interval);
-  }, [isRunning, timeLeft, onFinish]);
+  }, [isRunning, timeLeft <= 0]);
+
+  useEffect(() => {
+    if (timeLeft === 0 && isRunning) {
+      setIsRunning(false);
+      onFinishRef.current?.();
+    }
+  }, [timeLeft, isRunning]);
 
   if (!isRunning && timeLeft === 0) return null;
 
@@ -41,14 +46,14 @@ export function RestTimer({ initialSeconds = 90, onFinish }: RestTimerProps) {
   const formattedTime = `${minutes.toString().padStart(2, '0')}:${seconds.toString().padStart(2, '0')}`;
 
   const add30Seconds = () => {
-    setTimeLeft(prev => prev + 30);
+    setTimeLeft((prev) => prev + 30);
     setIsRunning(true);
   };
 
   const skipTimer = () => {
     setIsRunning(false);
     setTimeLeft(0);
-    if (onFinish) onFinish();
+    onFinishRef.current?.();
   };
 
   return (

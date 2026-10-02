@@ -2,6 +2,7 @@ import Fastify from 'fastify';
 import cors from '@fastify/cors';
 import cookie from '@fastify/cookie';
 
+import { closeDb, queryClient } from '@gym-tracker/db';
 import { authRoutes } from './routes/auth.js';
 import { userRoutes } from './routes/users.js';
 import { exerciseRoutes } from './routes/exercises.js';
@@ -16,22 +17,37 @@ export function buildApp() {
     logger: true,
   });
 
+  const webUrl = process.env.WEB_URL || 'http://localhost:3000';
+  const origins = Array.from(new Set([webUrl, 'http://localhost:3000', 'http://localhost:3001']));
+
   app.register(cors, {
-    origin: [
-      process.env.WEB_URL || 'http://localhost:3000',
-      'http://localhost:3000',
-      'http://localhost:3001',
-    ],
+    origin: origins,
     credentials: true,
-    methods: ['GET', 'POST', 'PUT', 'DELETE', 'OPTIONS'],
-    allowedHeaders: ['Content-Type', 'Authorization', 'x-user-id', 'cookie'],
+    methods: ['GET', 'POST', 'PUT', 'PATCH', 'DELETE', 'OPTIONS'],
+    allowedHeaders: ['Content-Type', 'Authorization'],
   });
 
-  app.register(cookie);
+  app.register(cookie, {
+    secret: process.env.BETTER_AUTH_SECRET || 'gym-tracker-local-dev-secret-key-32-bytes-long',
+  });
 
-  // Health check route
+  app.setErrorHandler((error, _request, reply) => {
+    const status = (error as any).statusCode && (error as any).statusCode >= 400 ? (error as any).statusCode : 500;
+    reply.status(status).send({ error: error.message || 'Internal Server Error' });
+  });
+
+  app.setNotFoundHandler((_request, reply) => {
+    reply.status(404).send({ error: 'Not Found' });
+  });
+
+  // Health check route (includes database reachability)
   app.get('/health', async () => {
-    return { status: 'ok', timestamp: new Date().toISOString() };
+    try {
+      await queryClient`SELECT 1`;
+      return { status: 'ok', database: 'up', timestamp: new Date().toISOString() };
+    } catch {
+      return { status: 'degraded', database: 'down', timestamp: new Date().toISOString() };
+    }
   });
 
   // Register domain routes
@@ -43,6 +59,10 @@ export function buildApp() {
   app.register(recordRoutes);
   app.register(bodyMeasurementRoutes);
   app.register(insightRoutes);
+
+  app.addHook('onClose', async () => {
+    await closeDb();
+  });
 
   return app;
 }

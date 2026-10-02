@@ -1,7 +1,23 @@
 import { db, queryClient, exercises } from './index.js';
 import * as dotenv from 'dotenv';
+import path from 'path';
+import fs from 'fs';
 
-dotenv.config({ path: '../../.env' });
+function loadRootEnv(): void {
+  let dir = process.cwd();
+  for (let i = 0; i < 5; i++) {
+    const candidate = path.join(dir, '.env');
+    if (fs.existsSync(candidate)) {
+      dotenv.config({ path: candidate });
+      return;
+    }
+    const parent = path.dirname(dir);
+    if (parent === dir) break;
+    dir = parent;
+  }
+  dotenv.config();
+}
+loadRootEnv();
 
 const initialExercises = [
   // Chest

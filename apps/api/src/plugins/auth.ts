@@ -1,7 +1,5 @@
 import { FastifyRequest, FastifyReply } from 'fastify';
 import { auth } from '@gym-tracker/auth';
-import { db, users, eq } from '@gym-tracker/db';
-import { isDbAvailable } from '../services/store.js';
 
 declare module 'fastify' {
   interface FastifyRequest {
@@ -14,65 +12,31 @@ declare module 'fastify' {
   }
 }
 
+/**
+ * Strict authentication: every request must carry a valid Better Auth
+ * session cookie for a user that exists in the local database.
+ * No demo users, no header-based impersonation, no memory fallbacks.
+ */
 export async function authenticate(request: FastifyRequest, reply: FastifyReply) {
   try {
-    const dbOk = await isDbAvailable();
+    const cookieHeader = request.headers.cookie || '';
+    const session = await auth.api.getSession({
+      headers: new Headers(cookieHeader ? { cookie: cookieHeader } : undefined) as any,
+    });
 
-    // 1. Try Better Auth session if DB is online
-    if (dbOk) {
-      try {
-        const session = await auth.api.getSession({
-          headers: request.headers as any,
-        });
-
-        if (session && session.user) {
-          request.user = {
-            id: session.user.id,
-            email: session.user.email,
-            name: session.user.name,
-            image: session.user.image,
-          };
-          return;
-        }
-      } catch (authErr) {}
-    }
-
-    // 2. Dev & Test mode instant authorization fallback
-    const devUserId = (request.headers['x-user-id'] as string) || (request.headers['authorization']?.replace('Bearer ', ''));
-
-    if (devUserId) {
-      if (dbOk) {
-        try {
-          const existingUser = await db.query.users.findFirst({
-            where: eq(users.id, devUserId),
-          });
-
-          if (existingUser) {
-            request.user = existingUser;
-            return;
-          }
-        } catch (err) {}
-      }
-
+    if (session?.user) {
       request.user = {
-        id: devUserId,
-        email: 'dev@gymtracker.local',
-        name: 'Demo Gym Athlete',
+        id: session.user.id,
+        email: session.user.email,
+        name: session.user.name,
+        image: session.user.image,
       };
       return;
     }
 
-    if (process.env.NODE_ENV !== 'production') {
-      request.user = {
-        id: 'dev-user-001',
-        email: 'dev@gymtracker.local',
-        name: 'Demo Gym Athlete',
-      };
-      return;
-    }
-
-    return reply.status(401).send({ error: 'Unauthorized: Session missing or expired' });
+    return reply.status(401).send({ error: 'Unauthorized: please sign in' });
   } catch (error) {
-    return reply.status(401).send({ error: 'Unauthorized: Authentication error' });
+    request.log.warn({ err: error }, 'Session lookup failed');
+    return reply.status(401).send({ error: 'Unauthorized: please sign in' });
   }
 }

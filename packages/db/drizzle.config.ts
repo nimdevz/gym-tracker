@@ -8,6 +8,9 @@ export default defineConfig({
   out: './drizzle',
   driver: 'pg',
   dbCredentials: {
-    connectionString: process.env.DATABASE_URL || 'postgres://postgres:postgrespassword@localhost:5432/gym_tracker',
+    connectionString:
+      process.env.DATABASE_URL_UNPOOLED ||
+      process.env.DATABASE_URL ||
+      'postgres://postgres:postgrespassword@localhost:5432/gym_tracker',
   },
 });

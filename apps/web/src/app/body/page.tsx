@@ -1,10 +1,9 @@
 'use client';
 
 import React, { useState } from 'react';
-import { useQuery, useMutation, useQueryClient } from '@tanstack/react-query';
-import { apiFetch } from '@/lib/api';
-import { BodyMeasurementData } from '@gym-tracker/types';
-import { Activity, Plus, Calendar, Trash2, Scale } from 'lucide-react';
+import { useBodyData, useWorkoutMutations, useAuthMode } from '@/lib/use-data';
+import { GuestBanner, PageHeader } from '@/components/ui';
+import { Plus, Trash2, Scale } from 'lucide-react';
 import {
   ResponsiveContainer,
   LineChart,
@@ -15,7 +14,6 @@ import {
 } from 'recharts';
 
 export default function BodyMeasurementsPage() {
-  const queryClient = useQueryClient();
   const [date, setDate] = useState(new Date().toISOString().split('T')[0]);
   const [weightKg, setWeightKg] = useState('');
   const [bodyFatPercentage, setBodyFatPercentage] = useState('');
@@ -24,50 +22,58 @@ export default function BodyMeasurementsPage() {
   const [armsCm, setArmsCm] = useState('');
   const [thighsCm, setThighsCm] = useState('');
 
-  const { data: list = [], isLoading } = useQuery<BodyMeasurementData[]>({
-    queryKey: ['bodyMeasurements'],
-    queryFn: () => apiFetch('/api/body-measurements'),
-  });
+  const { mode } = useAuthMode();
+  const mutations = useWorkoutMutations();
+  const [saving, setSaving] = useState(false);
 
-  const createMutation = useMutation({
-    mutationFn: (data: any) =>
-      apiFetch('/api/body-measurements', {
-        method: 'POST',
-        body: JSON.stringify(data),
-      }),
-    onSuccess: () => {
-      queryClient.invalidateQueries({ queryKey: ['bodyMeasurements'] });
-      setWeightKg('');
-      setBodyFatPercentage('');
-    },
-  });
+  const { data: list = [], isLoading } = useBodyData();
 
-  const deleteMutation = useMutation({
-    mutationFn: (id: string) =>
-      apiFetch(`/api/body-measurements/${id}`, {
-        method: 'DELETE',
-      }),
-    onSuccess: () => {
-      queryClient.invalidateQueries({ queryKey: ['bodyMeasurements'] });
+  const createPending = saving;
+  const createMutation = {
+    get isPending() {
+      return createPending;
     },
-  });
+    mutate: async (input: any) => {
+      setSaving(true);
+      try {
+        await mutations.saveBody(input);
+        setWeightKg('');
+        setBodyFatPercentage('');
+        setChestCm('');
+        setWaistCm('');
+        setArmsCm('');
+        setThighsCm('');
+      } finally {
+        setSaving(false);
+      }
+    },
+  };
+
+  const deleteMutation = {
+    mutate: (id: string) => {
+      void mutations.deleteBody(id);
+    },
+  };
 
   const handleSubmit = (e: React.FormEvent) => {
     e.preventDefault();
-    createMutation.mutate({
-      date,
-      weightKg: weightKg ? parseFloat(weightKg) : null,
-      bodyFatPercentage: bodyFatPercentage ? parseFloat(bodyFatPercentage) : null,
-      chestCm: chestCm ? parseFloat(chestCm) : null,
-      waistCm: waistCm ? parseFloat(waistCm) : null,
-      armsCm: armsCm ? parseFloat(armsCm) : null,
-      thighsCm: thighsCm ? parseFloat(thighsCm) : null,
-    });
+    const w = weightKg ? parseFloat(weightKg) : undefined;
+    const bf = bodyFatPercentage ? parseFloat(bodyFatPercentage) : undefined;
+    if (w !== undefined && (w <= 0 || w > 500)) return;
+    if (bf !== undefined && (bf <= 0 || bf > 70)) return;
+    const payload: Record<string, unknown> = { date };
+    if (w !== undefined) payload.weightKg = w;
+    if (bf !== undefined) payload.bodyFatPercentage = bf;
+    if (chestCm) payload.chestCm = parseFloat(chestCm);
+    if (waistCm) payload.waistCm = parseFloat(waistCm);
+    if (armsCm) payload.armsCm = parseFloat(armsCm);
+    if (thighsCm) payload.thighsCm = parseFloat(thighsCm);
+    createMutation.mutate(payload);
   };
 
   const chartData = [...list]
     .filter(m => m.weightKg)
-    .reverse()
+    .sort((a, b) => a.date.localeCompare(b.date))
     .map(m => ({
       date: m.date,
       weight: m.weightKg,
@@ -75,15 +81,9 @@ export default function BodyMeasurementsPage() {
     }));
 
   return (
-    <div className="mx-auto max-w-5xl px-4 py-8 sm:px-6 space-y-6">
-      <div>
-        <div className="flex items-center gap-2 text-xs font-bold text-teal-400 uppercase tracking-wider mb-1">
-          <Activity className="h-4 w-4" />
-          <span>Body Metrics</span>
-        </div>
-        <h1 className="text-3xl font-extrabold text-zinc-100">Body Tracking</h1>
-        <p className="text-sm text-zinc-400">Track body weight, body fat percentage, and physique circumferences.</p>
-      </div>
+    <div className="mx-auto max-w-5xl px-4 sm:px-6 py-8 space-y-6">
+      {mode === 'guest' && <GuestBanner />}
+      <PageHeader eyebrow="Body metrics" title="Body tracking" sub="Weight, body fat and measurements over time." />
 
       {/* Log Entry Form */}
       <form onSubmit={handleSubmit} className="rounded-3xl border border-zinc-800 bg-zinc-900/50 p-6 space-y-4">
@@ -242,7 +242,9 @@ export default function BodyMeasurementsPage() {
                     <td className="py-2.5 text-zinc-400">{m.thighsCm ? `${m.thighsCm} cm` : '-'}</td>
                     <td className="py-2.5 text-right">
                       <button
-                        onClick={() => deleteMutation.mutate(m.id)}
+                        onClick={() => {
+                          if (confirm(`Delete measurement from ${m.date}?`)) deleteMutation.mutate(m.id);
+                        }}
                         className="text-zinc-600 hover:text-rose-400 transition-colors p-1"
                       >
                         <Trash2 className="h-4 w-4" />
