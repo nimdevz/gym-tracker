@@ -67,8 +67,12 @@ function subscribe(fn: () => void) {
   };
 }
 
+export function useGuestVersion(): number {
+  return useSyncExternalStore(subscribe, stateVersion, () => 0);
+}
+
 export function useGuestStore(): GuestState {
-  useSyncExternalStore(subscribe, () => stateVersion(), () => 0);
+  useGuestVersion();
   return state;
 }
 

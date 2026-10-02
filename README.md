@@ -16,7 +16,7 @@ A production-quality **Gym Tracker web application** built from scratch using a 
 ### Backend
 - **Framework**: REST API (Node.js, TypeScript)
 - **Validation**: Zod
-- **Plugins**: `@fastify/cors`, `@fastify/cookie`
+- **Plugins**: CORS, signed cookies
 
 ### Database
 - **Database**: SQL database (Docker container)
@@ -25,7 +25,7 @@ A production-quality **Gym Tracker web application** built from scratch using a 
 
 ### Authentication
 - **Engine**: Session-based auth
-- **Provider**: Google OAuth 2.0 (Social Sign-In) + Persistent Sessions & Dev Mode Fallback
+- **Provider**: Google OAuth 2.0 (Social Sign-In) + email/password + persistent sessions
 
 ### Monorepo Infrastructure
 - **PackageManager**: pnpm
@@ -153,3 +153,46 @@ pnpm build
 4. **Personal Fitness Intelligence**: Deterministic rule engine detecting performance plateaus, weekly volume shifts, training consistency streaks, and progressive overload recommendations without third-party AI keys.
 5. **Body Weight & Measurements**: Body tracking with trend charts for weight, body fat %, chest, waist, arms, and thighs.
 6. **Future-Proof Mobile API Architecture**: Clean separation between web frontend and REST API, allowing future Expo React Native mobile apps to share the exact same backend endpoints.
+
+---
+
+## Deployment
+
+The web frontend deploys to Cloudflare Workers (see `apps/web/wrangler.toml`). The API is a long-running Node process and runs on any Node host (Render, Railway, Fly, VPS). The database is managed serverless SQL (see `.env` / Neon console).
+
+### Web (Workers)
+
+Build command:
+
+```bash
+pnpm install && pnpm --filter @gym-tracker/web exec opennextjs-cloudflare build
+```
+
+Deploy command:
+
+```bash
+pnpm --filter @gym-tracker/web exec opennextjs-cloudflare deploy
+```
+
+Or from `apps/web`: `pnpm preview` (local) / `pnpm deploy` (production).
+
+Required Worker variable:
+
+```env
+NEXT_PUBLIC_API_URL="https://your-api-host"
+```
+
+This is baked into the browser bundle at build time. Guest mode works without it; sign-in and cloud sync need the API reachable over HTTPS.
+
+### API (Node host)
+
+```bash
+# Set env: DATABASE_URL, BETTER_AUTH_SECRET, BETTER_AUTH_URL,
+# WEB_URL, GOOGLE_CLIENT_ID, GOOGLE_CLIENT_SECRET
+pnpm install
+pnpm --filter @gym-tracker/db migrate
+pnpm --filter @gym-tracker/db seed   # first time only
+pnpm --filter @gym-tracker/api start # or run src/index.ts with tsx
+```
+
+Register the production URLs in Google Cloud Console (authorized origins + redirect URIs) or Google sign-in will fail.

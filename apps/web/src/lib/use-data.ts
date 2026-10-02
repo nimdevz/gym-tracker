@@ -25,6 +25,7 @@ import {
   guestRemoveExercise,
   guestSaveBody,
   guestSaveSettings,
+  useGuestVersion,
   guestSettings,
   guestStartWorkout,
   guestUpdateSet,
@@ -69,13 +70,13 @@ export function useMeData() {
 
 export function useHistoryWorkouts() {
   const { mode } = useAuthMode();
-  useGuestStore();
+  const gv = useGuestVersion();
   const query = useQuery({
     queryKey: [...qk.workoutHistory],
     queryFn: () => apiFetch('/api/workouts'),
     enabled: mode === 'user',
   });
-  const guest = useMemo(() => guestCompletedWorkouts(), [mode]);
+  const guest = useMemo(() => guestCompletedWorkouts(), [mode, gv]);
   if (mode === 'guest') return { data: guest, isLoading: false, isGuest: true as const };
   return { data: (query.data as any[]) || [], isLoading: query.isLoading, isGuest: false as const };
 }
@@ -108,59 +109,59 @@ export function useWorkoutDetail(id: string) {
 
 export function useProgressData() {
   const { mode } = useAuthMode();
-  useGuestStore();
+  const gv = useGuestVersion();
   const query = useQuery({
     queryKey: [...qk.progress],
     queryFn: () => apiFetch('/api/progress'),
     enabled: mode === 'user',
   });
-  const guest = useMemo(() => guestProgress(), [mode]);
+  const guest = useMemo(() => guestProgress(), [mode, gv]);
   if (mode === 'guest') return { data: guest, isLoading: false, isGuest: true as const };
   return { data: query.data as any, isLoading: query.isLoading, isGuest: false as const };
 }
 
 export function useInsightsData() {
   const { mode } = useAuthMode();
-  useGuestStore();
+  const gv = useGuestVersion();
   const query = useQuery({
     queryKey: [...qk.insights],
     queryFn: () => apiFetch('/api/insights'),
     enabled: mode === 'user',
   });
-  const guest = useMemo(() => guestInsights(), [mode]);
+  const guest = useMemo(() => guestInsights(), [mode, gv]);
   if (mode === 'guest') return { data: guest, isLoading: false, isGuest: true as const };
   return { data: (query.data as any[]) || [], isLoading: query.isLoading, isGuest: false as const };
 }
 
 export function useRecordsData() {
   const { mode } = useAuthMode();
-  useGuestStore();
+  const gv = useGuestVersion();
   const query = useQuery({
     queryKey: [...qk.records],
     queryFn: () => apiFetch('/api/records'),
     enabled: mode === 'user',
   });
-  const guest = useMemo(() => guestRecords(), [mode]);
+  const guest = useMemo(() => guestRecords(), [mode, gv]);
   if (mode === 'guest') return { data: guest, isLoading: false, isGuest: true as const };
   return { data: (query.data as any[]) || [], isLoading: query.isLoading, isGuest: false as const };
 }
 
 export function useBodyData() {
   const { mode } = useAuthMode();
-  useGuestStore();
+  const gv = useGuestVersion();
   const query = useQuery({
     queryKey: [...qk.bodyMeasurements],
     queryFn: () => apiFetch('/api/body-measurements'),
     enabled: mode === 'user',
   });
-  const guest = useMemo(() => guestBodyList(), [mode]);
+  const guest = useMemo(() => guestBodyList(), [mode, gv]);
   if (mode === 'guest') return { data: guest, isLoading: false, isGuest: true as const };
   return { data: (query.data as any[]) || [], isLoading: query.isLoading, isGuest: false as const };
 }
 
 export function useLibraryExercises(search: string, muscle: string) {
   const { mode } = useAuthMode();
-  useGuestStore();
+  const gv = useGuestVersion();
   const query = useQuery({
     queryKey: qk.exerciseLibrary(search, muscle),
     queryFn: () => {
@@ -177,20 +178,20 @@ export function useLibraryExercises(search: string, muscle: string) {
     if (search) list = list.filter((e) => e.name.toLowerCase().includes(search.toLowerCase()));
     if (muscle !== 'all') list = list.filter((e) => e.muscleGroup === muscle);
     return list;
-  }, [mode, search, muscle]);
+  }, [mode, search, muscle, gv]);
   if (mode === 'guest') return { data: guest, isLoading: false, isGuest: true as const };
   return { data: (query.data as any[]) || [], isLoading: query.isLoading, isGuest: false as const };
 }
 
 export function useExerciseHistoryData(id: string) {
   const { mode } = useAuthMode();
-  useGuestStore();
+  const gv = useGuestVersion();
   const query = useQuery({
     queryKey: qk.exerciseHistory(id),
     queryFn: () => apiFetch(`/api/exercises/${id}/history`),
     enabled: mode === 'user' && !!id,
   });
-  const guest = useMemo(() => guestExerciseHistory(id), [mode, id]);
+  const guest = useMemo(() => guestExerciseHistory(id), [mode, id, gv]);
   if (mode === 'guest') return { data: guest, isLoading: false, isError: !guest, isGuest: true as const };
   return { data: query.data as any, isLoading: query.isLoading, isError: query.isError, isGuest: false as const };
 }
