@@ -196,3 +196,18 @@ pnpm --filter @gym-tracker/api start # or run src/index.ts with tsx
 ```
 
 Register the production URLs in Google Cloud Console (authorized origins + redirect URIs) or Google sign-in will fail.
+
+---
+
+## Update Log
+
+### 2026-10-02 16:55 IST — Guest mode, per-user cloud sync, Neon database, Workers deployment
+- Train without an account: workouts, sets, measurements, and settings stored on-device (localStorage) with a bundled 35-exercise library
+- Unified data layer: every page reads through shared hooks, so dashboard, history, progress, records, and body stay in sync in both guest and signed-in modes
+- Sign-in (email/password + Google) saves privately per user; one-click import moves guest data into the account
+- Strict session auth on all API routes; completed sets auto-persist personal records
+- Database on managed serverless SQL (Neon): pooled connections for the app, direct connection for migrations, verified startup checks
+- Web frontend deploys to Cloudflare Workers; API remains a Node process (see Deployment above)
+- Public stack mentions removed from UI and docs
+
+*Note: full serverless migration of the API is planned for later.*
